@@ -101,6 +101,8 @@ Fix any issues reported by `flutter doctor` before continuing.
 The project follows a clean, modular structure separating models, screens, and network services:
 
 ```text
+assets/
+  transport_logo.jpeg
 lib/
   main.dart
   models/
