@@ -72,7 +72,7 @@ class StopsBottomSheet extends StatelessWidget {
                           ),
                         ),
                         if (!isFinal)
-                          Container(width: 2, height: 35, color: const Color(0xFF5E43F3).withOpacity(0.3)),
+                          Container(width: 2, height: 35, color: const Color(0xFF5E43F3).withValues(alpha: 0.3)),
                       ],
                     ),
                     const SizedBox(width: 16),

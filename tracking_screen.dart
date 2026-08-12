@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+
 import '../models/bus_model.dart';
+import '../models/vehicle_tracking_model.dart';
+import '../services/api_service.dart';
 import 'stops_bottom_sheet.dart';
 
 class TrackingScreen extends StatefulWidget {
@@ -18,20 +23,93 @@ class TrackingScreen extends StatefulWidget {
 class _TrackingScreenState extends State<TrackingScreen> {
   final MapController _mapController = MapController();
   final LatLng _initialLocation = const LatLng(12.9165, 79.1325);
-  
+
   late bool _computedEveningMode;
+  LatLng? _markerLocation;
+  VehicleTrackingModel? _tracking;
+  Timer? _pollingTimer;
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    // If a mode was passed explicitly, use it; otherwise, calculate based on current time
     _computedEveningMode = widget.isEveningReturn ?? _isEveningTime();
+    _markerLocation = _initialLocation;
+    _fetchTracking();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchTracking());
   }
 
-  // Helper method: Returns true if current time is past 12:00 PM (noon)
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
   bool _isEveningTime() {
     final now = widget.timeProvider?.call() ?? DateTime.now();
     return now.hour >= 12;
+  }
+
+  Future<void> _fetchTracking() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final previousTracking = _tracking;
+    final previousMarker = _markerLocation;
+
+    try {
+      final tracking = await ApiService.fetchVehicleTracking(
+        routeId: widget.bus.id,
+        mode: _computedEveningMode ? 'evening' : 'morning',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+
+        if (tracking != null) {
+          // Live data available — update marker and tracking
+          _tracking = tracking;
+          _markerLocation = LatLng(tracking.latitude, tracking.longitude);
+          _errorMessage = null;
+          _mapController.move(_markerLocation!, 14.0);
+        } else if (previousTracking != null) {
+          // API returned null — fallback to last known tracking
+          _tracking = previousTracking;
+          _markerLocation = LatLng(previousTracking.latitude, previousTracking.longitude);
+          _errorMessage = 'Live feed unavailable — showing last known location';
+        } else if (previousMarker != null) {
+          // Keep the existing on-screen marker
+          _errorMessage = 'Live feed unavailable — showing last known location';
+        } else {
+          // Nothing available — fallback to initial location
+          _tracking = null;
+          _markerLocation = _initialLocation;
+          _errorMessage = 'Live bus location is unavailable right now.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        if (previousTracking != null) {
+          _tracking = previousTracking;
+          _markerLocation = LatLng(previousTracking.latitude, previousTracking.longitude);
+          _errorMessage = 'Unable to fetch live data — showing last known location.';
+        } else if (previousMarker != null) {
+          _errorMessage = 'Unable to fetch live data — showing last known location.';
+        } else {
+          _markerLocation = _initialLocation;
+          _errorMessage = 'Unable to fetch live data.';
+        }
+      });
+      // Optional: report/log error
+      // debugPrint('fetchTracking error: $e');
+    }
   }
 
   void _showStopsModal(BuildContext context) {
@@ -46,12 +124,28 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 
+  String get _trackingStatus {
+    if (_isLoading) {
+      return 'Loading live location...';
+    }
+    if (_tracking != null) {
+      final status = _tracking!.status?.toUpperCase() ?? 'UNKNOWN';
+      final speed = _tracking!.speedKph != null ? '${_tracking!.speedKph} km/h' : 'speed unavailable';
+      return '$status · $speed';
+    }
+    return _errorMessage ?? 'Live location not available';
+  }
+
+  String get _updatedAtLabel {
+    if (_tracking == null) return '';
+    return 'Updated ${TimeOfDay.fromDateTime(_tracking!.updatedAt.toLocal()).format(context)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // Interactive Map Layer
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
@@ -66,27 +160,22 @@ class _TrackingScreenState extends State<TrackingScreen> {
               MarkerLayer(
                 markers: [
                   Marker(
-                    point: _initialLocation,
+                    point: _markerLocation ?? _initialLocation,
                     width: 80,
                     height: 80,
-                    child: const Column(
-                      children: [
-                        Icon(Icons.directions_bus, color: Color(0xFF5E43F3), size: 36),
-                      ],
-                    ),
+                    child: const Icon(Icons.directions_bus, color: Color(0xFF5E43F3), size: 36),
                   ),
                 ],
               ),
             ],
           ),
 
-          // Top Header Floating Card (Shows active automated session mode)
           Positioned(
             top: 50,
             left: 16,
             right: 16,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFF5E43F3),
                 borderRadius: BorderRadius.circular(16),
@@ -98,28 +187,18 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   ),
                 ],
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _computedEveningMode ? 'EVENING (RETURN)' : 'MORNING (TO COLLEGE)',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
                           widget.bus.routeName,
                           style: const TextStyle(
                             color: Colors.white,
@@ -127,9 +206,29 @@ class _TrackingScreenState extends State<TrackingScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _computedEveningMode ? 'EVENING (RETURN)' : 'MORNING (TO COLLEGE)',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _trackingStatus,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                  if (_tracking != null)
+                    Text(
+                      _updatedAtLabel,
+                      style: const TextStyle(color: Colors.white70, fontSize: 10),
+                    ),
                 ],
               ),
             ),
@@ -145,14 +244,17 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   heroTag: 'recenter',
                   backgroundColor: Colors.white,
                   child: const Icon(Icons.my_location, color: Colors.black87),
-                  onPressed: () => _mapController.move(_initialLocation, 14.0),
+                  onPressed: () {
+                    final target = _markerLocation ?? _initialLocation;
+                    _mapController.move(target, 14.0);
+                  },
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'refresh',
                   backgroundColor: Colors.white,
                   child: const Icon(Icons.refresh, color: Colors.black87),
-                  onPressed: () => setState(() {}),
+                  onPressed: _fetchTracking,
                 ),
               ],
             ),
@@ -173,7 +275,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.15),
+                      color: Colors.black.withValues(alpha: 0.15),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/bus_model.dart';
+import '../services/api_service.dart';
 import 'tracking_screen.dart';
 import 'stops_bottom_sheet.dart';
 
@@ -13,19 +14,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Controller for the search text field
   final TextEditingController _searchController = TextEditingController();
-  
-  // State variable to hold the filtered routes
-  List<BusRouteModel> _filteredRoutes = [];
 
-  // Automated time check: returns true if 12:00 PM or later (Evening Return)
-  bool get _isEveningTime {
-    final now = widget.timeProvider?.call() ?? DateTime.now();
-    return now.hour >= 12;
-  }
-
-  final List<BusRouteModel> routes = [
+  final List<BusRouteModel> _fallbackRoutes = [
     BusRouteModel(
       id: '1',
       routeName: 'Sankaranpalayam',
@@ -36,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
       id: '2',
       routeName: 'kannamangalam',
       busNo: 'Bus 05',
-      forwardStops: ['kannamangalam', 'kanyambadi', 'adukamparai', 'old bus','AMCET'],
+      forwardStops: ['kannamangalam', 'kanyambadi', 'adukamparai', 'old bus', 'AMCET'],
     ),
     BusRouteModel(
       id: '3',
@@ -54,27 +45,56 @@ class _HomeScreenState extends State<HomeScreen> {
       id: '5',
       routeName: 'Sholingur',
       busNo: 'Bus 18',
-      forwardStops: ['Sholigur','navalpur','Ranipet collectrate','sipcot','tiruvalam','puttuthakku','old','new','loke','oval','turf','AMCET'],
-    )
+      forwardStops: ['Sholigur', 'navalpur', 'Ranipet collectrate', 'sipcot', 'tiruvalam', 'puttuthakku', 'old', 'new', 'loke', 'oval', 'turf', 'AMCET'],
+    ),
   ];
+
+  late List<BusRouteModel> _routes;
+  late List<BusRouteModel> _filteredRoutes;
+  String? _loadErrorMessage;
+
+  bool get _isEveningTime {
+    final now = widget.timeProvider?.call() ?? DateTime.now();
+    return now.hour >= 12;
+  }
 
   @override
   void initState() {
     super.initState();
-    // Initialize the filtered routes with all routes initially
-    _filteredRoutes = routes;
-    // Listen to changes in the search field
+    _routes = List.from(_fallbackRoutes);
+    _filteredRoutes = List.from(_routes);
     _searchController.addListener(_filterRoutes);
+    Future.microtask(_loadRoutes);
+  }
+
+  Future<void> _loadRoutes() async {
+    final loadedRoutes = await ApiService.fetchRoutes();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (loadedRoutes.isNotEmpty) {
+        _routes = loadedRoutes;
+        _filteredRoutes = List.from(_routes);
+        _loadErrorMessage = null;
+      } else {
+        _routes = List.from(_fallbackRoutes);
+        _filteredRoutes = List.from(_routes);
+        _loadErrorMessage = 'Using cached routes while the backend endpoint is unavailable.';
+      }
+    });
   }
 
   void _filterRoutes() {
     final query = _searchController.text.toLowerCase();
     setState(() {
-      _filteredRoutes = routes.where((bus) {
+      _filteredRoutes = _routes.where((bus) {
         final matchesBusName = bus.routeName.toLowerCase().contains(query);
         final matchesBusNo = bus.busNo.toLowerCase().contains(query);
         final matchesStop = bus.forwardStops.any((stop) => stop.toLowerCase().contains(query));
-        
+
         return matchesBusName || matchesBusNo || matchesStop;
       }).toList();
     });
@@ -155,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
+                          color: Colors.black.withValues(alpha: 0.08),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -227,6 +247,23 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
+            if (_loadErrorMessage != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF6D6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _loadErrorMessage!,
+                    style: const TextStyle(color: Color(0xFF8A6900), fontSize: 12),
+                  ),
+                ),
+              ),
+
             // Route Cards ListView
             Expanded(
               child: _filteredRoutes.isEmpty
@@ -249,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             borderRadius: BorderRadius.circular(24),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Colors.black.withValues(alpha: 0.05),
                                 blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),

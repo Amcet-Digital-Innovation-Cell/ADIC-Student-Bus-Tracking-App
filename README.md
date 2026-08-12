@@ -1,3 +1,4 @@
+
 # Annai Mira College Bus Tracking App 🚌
 
 A mobile-first real-time college bus tracking and route management application built with **Flutter** and **Dart**. This application allows students to view active bus routes, check ordered stops dynamically for morning and evening travel modes, and track bus locations in real-time.
@@ -61,20 +62,6 @@ export PATH="$PATH:/Users/<username>/development/flutter/bin"
 source ~/.zshrc
 ```
 
-### Step C: Verify Flutter installation
-
-After adding Flutter to your PATH, verify the installation and switch to the stable channel:
-
-```bash
-flutter channel stable
-flutter upgrade
-flutter --version
-flutter doctor -v
-```
-
-Fix any issues reported by `flutter doctor` before continuing.
-
-
 ---
 
 ## 3. Android Command-Line Tools Configuration
@@ -84,7 +71,7 @@ To build and run the app on Android emulators, configure the Android SDK and com
 1. Install Android Studio from https://developer.android.com/studio.
 2. Open Android Studio and go to **Tools > SDK Manager**.
 3. In **SDK Platforms**, ensure at least one Android SDK version is selected (for example, Android 14.0 / API 34).
-4. In **SDK Tools**, enable for this path (C:\Users\lokesh\AppData\Local\Android\Sdk):
+4. In **SDK Tools**, enable for LIKE this path (C:\Users\lokesh\AppData\Local\Android\Sdk):
    - Android SDK Command-line Tools (latest)
    - Android SDK Build-Tools
 5. Click **Apply** to install the chosen tools.
@@ -107,40 +94,6 @@ flutter doctor
 
 Fix any issues reported by `flutter doctor` before continuing.
 
-### Additional Android / Java requirements (Windows examples)
-
-- Java JDK: Android Studio bundles a compatible JDK, but you can install OpenJDK 11+ if needed. Verify with:
-
-```powershell
-java -version
-```
-
-- Android SDK environment variables (set these if `flutter doctor` reports missing SDK):
-
-Windows (PowerShell example):
-
-```powershell
-setx ANDROID_SDK_ROOT "C:\Users\<username>\AppData\Local\Android\Sdk"
-setx PATH "%PATH%;C:\Users\<username>\AppData\Local\Android\Sdk\platform-tools"
-```
-
-Replace `<username>` with your Windows user name. After `setx`, restart your terminal.
-
-- Emulator hypervisor: enable hardware virtualization in BIOS/UEFI. On Windows, either install Intel HAXM (for Intel CPUs) or enable Windows Hypervisor Platform (WHPX) / Hyper-V as appropriate.
-
-- Install SDK platforms & images: In Android Studio SDK Manager, install at least one `Android SDK Platform` (API 33 or 34) and a corresponding `System Image` for the emulator.
-
-### Physical Android device
-
-- Enable **Developer options** and **USB debugging** on the device.
-- Connect via USB and verify with:
-
-```bash
-adb devices
-```
-
-If your device is listed, you can run the app on it with `flutter run`.
-
 ---
 
 ## 4. Project Folder Structure
@@ -153,25 +106,44 @@ lib/
   models/
     bus_model.dart          # Data entities for routes and stops
   screens/
-    splash_screen.dart
     home_screen.dart        # Main dashboard with morning/evening mode controls
     tracking_screen.dart    # Live map tracking screen
-    stops_bottom_sheet.dart # Ordered stop list for selected routes 
+    stops_bottom_sheet.dart # Ordered stop list for selected routes
+  services/
+    api_service.dart        # API client and backend communication
 pubspec.yaml                # Flutter dependencies and assets
 README.md                   # Project documentation
 ```
 
 ## 4.1 How the App Works
 
-- `main.dart` initializes the app and loads the main screen.
-- `home_screen.dart` shows the list of available routes and the current travel mode.
-- `tracking_screen.dart` displays a map with the current bus position and route path.
-- `stops_bottom_sheet.dart` shows an ordered list of stops for the selected route.
+The app is structured so the UI, data models, and backend calls are separated for clarity.
+
+- `main.dart` — app entry point. Registers routes and bootstraps `SplashScreen` → `HomeScreen`.
+- `screens/splash_screen.dart` — small startup splash (seen on app launch).
+- `screens/home_screen.dart` — lists available bus routes (searchable). Loads routes from `ApiService.fetchRoutes()` and falls back to a built-in `fallbackRoutes` list when the backend is unavailable. Shows route cards with origin/destination preview, stop count, and `Stops` / `Track` actions.
+- `screens/stops_bottom_sheet.dart` — modal bottom sheet that displays the ordered list of stops. `BusRouteModel.getStops(isEveningReturn)` reverses the stop order for evening/return mode.
+- `screens/tracking_screen.dart` — map screen using `flutter_map` with OpenStreetMap tiles. It polls `ApiService.fetchVehicleTracking()` every 10 seconds to update the bus marker and shows status, last-updated time, and quick actions (recenter, refresh).
+- `models/bus_model.dart` — `BusRouteModel` holds route metadata and stop lists; provides `getStops()` to return morning or evening order.
+- `models/vehicle_tracking_model.dart` — model for live vehicle tracking payload (latitude, longitude, speed, status, updatedAt).
+- `services/api_service.dart` — HTTP client helpers. Current base URL: `https://bus-tracking-backend-8s.onrender.com`. Functions:
+  - `fetchRoutes()` — GETs the routes JSON, parses payloads, and returns a `List<BusRouteModel>`. Returns an empty list on timeout or non-200 responses so the UI may fall back to local routes.
+  - `fetchVehicleTracking(routeId, mode)` — GETs the tracking endpoint `/api/routes/<routeId>/tracking?mode=<morning|evening>` and returns a `VehicleTrackingModel` (or `null` on errors/timeouts).
+
+Key behaviors to know:
+
+- Travel mode (morning / evening) is derived from the current time (`hour >= 12` is treated as evening). Screens pass `isEveningReturn` to show reversed stops and request tracking with a `mode` query parameter.
+- Route list search filters by route name, bus number, and stop names (client-side filtering).
+- Tracking shows a single bus marker, recent status text, and gracefully falls back to the last-known location or a static initial location when live data is unavailable.
+- Map tiles are provided by OpenStreetMap (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`) via the `flutter_map` package.
+
+If you update API contract shapes, update `models/` and `ApiService` parsing accordingly.
 
 ## 4.2 Where to Make Changes
 
 - Update data models in `lib/models/bus_model.dart` when route or stop structures change.
 - Modify UI screens in `lib/screens/` to change app layout or user interactions.
+- Adjust network requests in `lib/services/api_service.dart` if the API changes.
 
 ---
 
@@ -181,7 +153,7 @@ README.md                   # Project documentation
 
 ```bash
 git clone <repository-url>
-cd studentapp
+cd fluttermobileapp
 ```
 
 2. Install dependencies:
@@ -239,37 +211,6 @@ While the app is running in the terminal:
 - If the app requires API keys or tokens, store them securely and do not commit them to source control.
 - Use `flutter clean` to remove build artifacts before rebuilding.
 
-### Environment variables & secrets
-
-- If the project requires API keys or configuration, add them locally and exclude them from source control. Example approaches:
-
-  - Create a `.env` or `.env.local` and load it at runtime (use a package such as `flutter_dotenv`).
-  - Add a `lib/config.dart` excluded from VCS and documented in `.gitignore`.
-
-Example `.env` usage (after adding `flutter_dotenv`):
-
-```dart
-// load in main.dart
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-Future<void> main() async {
-  await dotenv.load(fileName: ".env");
-  runApp(MyApp());
-}
-```
-
-### iOS (macOS only)
-
-- To run on iOS simulators or devices you need Xcode (macOS) and CocoaPods. Install CocoaPods if missing:
-
-```bash
-sudo gem install cocoapods
-cd ios
-pod install
-```
-
-After installing pods, open the workspace in Xcode if you need to manage signing or capabilities.
-
 ## 7.1 Quick Troubleshooting
 
 - If `flutter doctor` reports missing tools, install the missing SDK components or accept licenses.
@@ -277,15 +218,73 @@ After installing pods, open the workspace in Xcode if you need to manage signing
 - If the app fails to build, run `flutter clean` and then `flutter pub get` before retrying.
 - If map or location data is unavailable, verify the API service URL and network connectivity.
 
-- Common fixes:
-
-  - PATH problems: restart your terminal after updating environment variables. On Windows, log out and back in if `setx` was used.
-  - `adb` not found: ensure `platform-tools` is installed and on your `PATH`.
-  - Emulator hangs or fails to boot: check virtualization is enabled in BIOS/UEFI and that a compatible hypervisor is installed (HAXM, WHPX, or Hyper-V).
-  - Build errors after package changes: run `flutter pub get` and `flutter clean`.
-
 ---
 
 ## Contribution
+
+## 8. Additional Files & Important Paths
+
+This project contains platform, build, and generated folders in addition to the app sources. Important top-level paths:
+
+- `android/`: Native Android project and Gradle build files. Modify `android/app/src/main/AndroidManifest.xml` and Gradle settings here.
+- `ios/`: iOS Xcode project and configuration. Update `ios/Runner/Info.plist` for iOS-specific keys and entitlements.
+- `lib/`: Main Dart/Flutter source files (models, screens, services).
+- `assets/`: Static assets bundled with the app (images, fonts, JSON). See `pubspec.yaml` for declared assets.
+- `build/`: Generated build artifacts (do not commit).
+- `test/`: Unit and widget tests. See `flutter test` to run them.
+- `pubspec.yaml`: Dependency declarations, fonts, assets, and other Flutter metadata.
+- `local.properties`: Machine-specific Android SDK locations (not committed).
+
+## 9. Environment Variables & API Keys
+
+This app may require API keys (for maps, backend, etc.). Recommended approaches:
+
+- Use a local, untracked file or use a package such as `flutter_dotenv` to load keys from `.env`.
+- For Android, add map API keys to `android/app/src/main/AndroidManifest.xml` as `<meta-data>` or use gradle `manifestPlaceholders`.
+- For iOS, add keys to `ios/Runner/Info.plist` or configure at runtime from a secure source.
+
+Example (Google Maps API key) AndroidManifest.xml snippet:
+
+```xml
+<application>
+  <meta-data android:name="com.google.android.geo.API_KEY"
+             android:value="YOUR_API_KEY_HERE"/>
+</application>
+```
+
+DO NOT commit API keys to source control. Add them to `.gitignore` or use CI secret management.
+
+## 10. Running Tests & CI
+
+- Run unit and widget tests:
+
+```bash
+flutter test
+```
+
+- For integration tests, use `flutter drive` or the integration_test package (see `test_driver/` or `integration_test/` if present).
+- Add `flutter analyze` and `flutter test` to CI pipelines to enforce static checks and tests.
+
+## 11. Formatting & Linting
+
+- Format the codebase:
+
+```bash
+flutter format .
+```
+
+- Run static analysis:
+
+```bash
+flutter analyze
+```
+
+Consider enabling `analysis_options.yaml` rules and adding a `lint` step to CI.
+
+## 12. Developer Tips
+
+- To run on a physical Android device, enable developer options and USB debugging, then run `flutter run` with the device connected.
+- If using Google Maps, enable the relevant APIs in Google Cloud Console and restrict the key to your app's package name and SHA-1 (Android).
+- If you need per-environment configuration (dev/stage/prod), maintain separate `.env` files and load the correct one at build time.
 
 Contributions are welcome. Improve documentation, add features, fix bugs, or update UI/UX behavior as needed.
