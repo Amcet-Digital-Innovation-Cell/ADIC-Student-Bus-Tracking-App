@@ -71,7 +71,7 @@ To build and run the app on Android emulators, configure the Android SDK and com
 1. Install Android Studio from https://developer.android.com/studio.
 2. Open Android Studio and go to **Tools > SDK Manager**.
 3. In **SDK Platforms**, ensure at least one Android SDK version is selected (for example, Android 14.0 / API 34).
-4. In **SDK Tools**, enable for LIKE this path (C:\Users\lokesh\AppData\Local\Android\Sdk):
+3. In **SDK Tools**, enable the following tools (they will be installed to a path like `C:\Users\<username>\AppData\Local\Android\Sdk`):
    - Android SDK Command-line Tools (latest)
    - Android SDK Build-Tools
 5. Click **Apply** to install the chosen tools.
@@ -97,6 +97,17 @@ Fix any issues reported by `flutter doctor` before continuing.
 ---
 
 ## 4. Project Folder Structure
+
+### Project Creation
+
+To create a new Flutter project:
+
+1. Open the Flutter extracted folder with VS Code.
+2. Go to **View > Command Palette**.
+3. Select **Flutter: Create Application**.
+4. Select the folder where you want to create the project.
+
+### Project Organization
 
 The project follows a clean, modular structure separating models, screens, and network services:
 
@@ -220,8 +231,6 @@ While the app is running in the terminal:
 
 ---
 
-## Contribution
-
 ## 8. Additional Files & Important Paths
 
 This project contains platform, build, and generated folders in addition to the app sources. Important top-level paths:
@@ -286,5 +295,7 @@ Consider enabling `analysis_options.yaml` rules and adding a `lint` step to CI.
 - To run on a physical Android device, enable developer options and USB debugging, then run `flutter run` with the device connected.
 - If using Google Maps, enable the relevant APIs in Google Cloud Console and restrict the key to your app's package name and SHA-1 (Android).
 - If you need per-environment configuration (dev/stage/prod), maintain separate `.env` files and load the correct one at build time.
+
+## 13. Contributions
 
 Contributions are welcome. Improve documentation, add features, fix bugs, or update UI/UX behavior as needed.
