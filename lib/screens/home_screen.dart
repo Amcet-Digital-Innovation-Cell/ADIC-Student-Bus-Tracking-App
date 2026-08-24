@@ -141,13 +141,13 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  const Row(
                     children: [
                       Expanded(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
-                          child: const Text(
+                          child: Text(
                             'Where to go?',
                             style: TextStyle(
                               color: Colors.white,
@@ -212,12 +212,12 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
               child: Row(
                 children: [
-                  Expanded(
+                  const Expanded(
                     child: Text(
                       'Available Routes',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: Color(0xFF2D3142),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class SplashScreen extends StatelessWidget {
-  const SplashScreen({Key? key}) : super(key: key);
+  const SplashScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -88,10 +88,10 @@ class SplashScreen extends StatelessWidget {
                     offset: Offset(0, slideVal),
                     child: Opacity(
                       opacity: (1.0 - (slideVal / 50.0)).clamp(0.0, 1.0),
-                      child: Column(
+                      child: const Column(
                         children: [
                           // Title
-                          const Text(
+                          Text(
                             'TRANSPORT',
                             style: TextStyle(
                               color: Colors.white,
@@ -100,10 +100,10 @@ class SplashScreen extends StatelessWidget {
                               letterSpacing: 2.5,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
 
                           // College Name
-                          const Text(
+                          Text(
                             'Annai Mira College of Engineering',
                             style: TextStyle(
                               color: Colors.white70,
@@ -111,10 +111,10 @@ class SplashScreen extends StatelessWidget {
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          SizedBox(height: 6),
 
                           // Version
-                          const Text(
+                          Text(
                             'VERSION 1.0',
                             style: TextStyle(
                               color: Colors.white38,
@@ -154,9 +154,9 @@ class SplashScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(30),
                           ),
                         ),
-                        child: Row(
+                        child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
+                          children: [
                             Text(
                               'Get Started',
                               style: TextStyle(
