@@ -7,8 +7,12 @@ import '../models/bus_model.dart';
 import '../models/vehicle_tracking_model.dart';
 
 class ApiService {
-  static const String baseUrl = 'https://bus-tracking-backend-8s.onrender.com';
-  static const String endpoint = '/buses.json';
+  // ── URL per target ────────────────────────────────────────────────────────
+  // Windows desktop / Chrome / Edge (flutter run on PC): http://localhost:3001
+  // Android Emulator:                                    http://10.0.2.2:3001
+  // Physical Android/iOS device (same Wi-Fi as PC):     http://10.228.166.103:3001
+  static const String baseUrl = 'http://localhost:3001';
+  static const String endpoint = '/api/public/buses';
 
   static Future<List<BusRouteModel>> fetchRoutes({
     http.Client? client,
@@ -60,7 +64,7 @@ class ApiService {
     Duration timeout = const Duration(seconds: 4),
   }) async {
     final httpClient = client ?? http.Client();
-    final trackingEndpoint = '/api/routes/$routeId/tracking';
+    final trackingEndpoint = '/api/public/buses/$routeId/tracking';
 
     try {
       final uri = Uri.parse('$baseUrlOverride$trackingEndpoint').replace(

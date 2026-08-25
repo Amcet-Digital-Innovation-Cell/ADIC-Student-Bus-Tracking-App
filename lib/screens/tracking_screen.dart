@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import '../models/bus_model.dart';
 import '../models/vehicle_tracking_model.dart';
@@ -14,7 +15,8 @@ class TrackingScreen extends StatefulWidget {
   final bool? isEveningReturn;
   final DateTime Function()? timeProvider;
 
-  const TrackingScreen({super.key, required this.bus, this.isEveningReturn, this.timeProvider});
+  const TrackingScreen(
+      {super.key, required this.bus, this.isEveningReturn, this.timeProvider});
 
   @override
   State<TrackingScreen> createState() => _TrackingScreenState();
@@ -27,7 +29,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
   late bool _computedEveningMode;
   LatLng? _markerLocation;
   VehicleTrackingModel? _tracking;
-  Timer? _pollingTimer;
+  IO.Socket? _socket;
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -37,18 +39,104 @@ class _TrackingScreenState extends State<TrackingScreen> {
     _computedEveningMode = widget.isEveningReturn ?? _isEveningTime();
     _markerLocation = _initialLocation;
     _fetchTracking();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchTracking());
   }
 
   @override
   void dispose() {
-    _pollingTimer?.cancel();
+    _socket?.disconnect();
+    _socket?.destroy();
     super.dispose();
   }
 
   bool _isEveningTime() {
     final now = widget.timeProvider?.call() ?? DateTime.now();
     return now.hour >= 12;
+  }
+
+  void _initSocket(String vehicleId) {
+    if (_socket != null) {
+      _socket!.disconnect();
+      _socket!.destroy();
+    }
+
+    // Connect to the HTTP backend server (port 3001)
+    _socket = IO.io(
+        ApiService.baseUrl,
+        IO.OptionBuilder()
+            .setTransports(['websocket', 'polling'])
+            .enableAutoConnect()
+            .setReconnectionDelay(1000)
+            .setReconnectionDelayMax(5000)
+            .build());
+
+    _socket!.onConnect((_) {
+      debugPrint('[Socket] Connected to Socket.IO Server');
+      // Join the vehicle room using the existing backend pattern
+      _socket!.emit('joinVehicle', vehicleId);
+    });
+
+    _socket!.onDisconnect((reason) {
+      debugPrint('[Socket] Disconnected: $reason');
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Connection lost. Reconnecting…';
+        });
+      }
+    });
+
+    _socket!.on('connect_error', (error) {
+      debugPrint('[Socket] Connection error: $error');
+    });
+
+    _socket!.on('busLocationUpdated', (data) {
+      if (!mounted) return;
+      debugPrint('[Socket] busLocationUpdated received: $data');
+
+      // The payload structure:
+      // {
+      //   vehicleNumber: string,
+      //   latitude: number,
+      //   longitude: number,
+      //   speed: number,
+      //   rawStatus: string,
+      //   ignition: string,
+      //   location: string,
+      //   gpsActualTime: string,
+      //   receivedAt: string
+      // }
+      if (data != null &&
+          data['vehicleNumber']?.toString().toUpperCase() ==
+              vehicleId.toUpperCase()) {
+        setState(() {
+          final double lat = (data['latitude'] is num
+                  ? data['latitude'] as num
+                  : double.tryParse(data['latitude']?.toString() ?? '0') ?? 0)
+              .toDouble();
+          final double lng = (data['longitude'] is num
+                  ? data['longitude'] as num
+                  : double.tryParse(data['longitude']?.toString() ?? '0') ?? 0)
+              .toDouble();
+
+          _tracking = VehicleTrackingModel(
+            routeId: widget.bus.id,
+            vehicleId: vehicleId,
+            latitude: lat,
+            longitude: lng,
+            updatedAt: DateTime.tryParse(data['receivedAt']?.toString() ??
+                    data['gpsActualTime']?.toString() ??
+                    '') ??
+                DateTime.now(),
+            speedKph: data['speed'] is int
+                ? data['speed'] as int
+                : int.tryParse(data['speed']?.toString() ?? ''),
+            status: data['rawStatus']?.toString(),
+          );
+          _markerLocation = LatLng(lat, lng);
+          _errorMessage = null;
+          _mapController.move(_markerLocation!, 14.0);
+        });
+      }
+    });
   }
 
   Future<void> _fetchTracking() async {
@@ -77,10 +165,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
           _markerLocation = LatLng(tracking.latitude, tracking.longitude);
           _errorMessage = null;
           _mapController.move(_markerLocation!, 14.0);
+
+          // Initialize Socket.IO connection for live updates using vehicleId (registration number)
+          if (tracking.vehicleId.isNotEmpty) {
+            _initSocket(tracking.vehicleId);
+          }
         } else if (previousTracking != null) {
           // API returned null — fallback to last known tracking
           _tracking = previousTracking;
-          _markerLocation = LatLng(previousTracking.latitude, previousTracking.longitude);
+          _markerLocation =
+              LatLng(previousTracking.latitude, previousTracking.longitude);
           _errorMessage = 'Live feed unavailable — showing last known location';
         } else if (previousMarker != null) {
           // Keep the existing on-screen marker
@@ -98,17 +192,18 @@ class _TrackingScreenState extends State<TrackingScreen> {
         _isLoading = false;
         if (previousTracking != null) {
           _tracking = previousTracking;
-          _markerLocation = LatLng(previousTracking.latitude, previousTracking.longitude);
-          _errorMessage = 'Unable to fetch live data — showing last known location.';
+          _markerLocation =
+              LatLng(previousTracking.latitude, previousTracking.longitude);
+          _errorMessage =
+              'Unable to fetch live data — showing last known location.';
         } else if (previousMarker != null) {
-          _errorMessage = 'Unable to fetch live data — showing last known location.';
+          _errorMessage =
+              'Unable to fetch live data — showing last known location.';
         } else {
           _markerLocation = _initialLocation;
           _errorMessage = 'Unable to fetch live data.';
         }
       });
-      // Optional: report/log error
-      // debugPrint('fetchTracking error: $e');
     }
   }
 
@@ -130,7 +225,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
     }
     if (_tracking != null) {
       final status = _tracking!.status?.toUpperCase() ?? 'UNKNOWN';
-      final speed = _tracking!.speedKph != null ? '${_tracking!.speedKph} km/h' : 'speed unavailable';
+      final speed = _tracking!.speedKph != null
+          ? '${_tracking!.speedKph} km/h'
+          : 'speed unavailable';
       return '$status · $speed';
     }
     return _errorMessage ?? 'Live location not available';
@@ -151,6 +248,13 @@ class _TrackingScreenState extends State<TrackingScreen> {
             options: MapOptions(
               initialCenter: _initialLocation,
               initialZoom: 13.0,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.pinchZoom |
+                    InteractiveFlag.scrollWheelZoom |
+                    InteractiveFlag.drag |
+                    InteractiveFlag.doubleTapZoom |
+                    InteractiveFlag.pinchMove,
+              ),
             ),
             children: [
               TileLayer(
@@ -163,7 +267,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                     point: _markerLocation ?? _initialLocation,
                     width: 80,
                     height: 80,
-                    child: const Icon(Icons.directions_bus, color: Color(0xFF5E43F3), size: 36),
+                    child: const Icon(Icons.directions_bus,
+                        color: Color(0xFF5E43F3), size: 36),
                   ),
                 ],
               ),
@@ -181,7 +286,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     blurRadius: 8,
                     offset: const Offset(0, 4),
                   ),
@@ -211,7 +316,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _computedEveningMode ? 'EVENING (RETURN)' : 'MORNING (TO COLLEGE)',
+                    _computedEveningMode
+                        ? 'EVENING (RETURN)'
+                        : 'MORNING (TO COLLEGE)',
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 11,
@@ -227,7 +334,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                   if (_tracking != null)
                     Text(
                       _updatedAtLabel,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 10),
                     ),
                 ],
               ),
@@ -240,6 +348,31 @@ class _TrackingScreenState extends State<TrackingScreen> {
             bottom: 110,
             child: Column(
               children: [
+                // Zoom In
+                FloatingActionButton.small(
+                  heroTag: 'zoom_in',
+                  backgroundColor: Colors.white,
+                  onPressed: () {
+                    final cam = _mapController.camera;
+                    _mapController.move(
+                        cam.center, (cam.zoom + 1).clamp(3.0, 19.0));
+                  },
+                  child: const Icon(Icons.add, color: Colors.black87),
+                ),
+                const SizedBox(height: 4),
+                // Zoom Out
+                FloatingActionButton.small(
+                  heroTag: 'zoom_out',
+                  backgroundColor: Colors.white,
+                  onPressed: () {
+                    final cam = _mapController.camera;
+                    _mapController.move(
+                        cam.center, (cam.zoom - 1).clamp(3.0, 19.0));
+                  },
+                  child: const Icon(Icons.remove, color: Colors.black87),
+                ),
+                const SizedBox(height: 12),
+                // Re-center on bus
                 FloatingActionButton.small(
                   heroTag: 'recenter',
                   backgroundColor: Colors.white,
@@ -249,12 +382,13 @@ class _TrackingScreenState extends State<TrackingScreen> {
                     _mapController.move(target, 14.0);
                   },
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
+                // Manual refresh
                 FloatingActionButton.small(
                   heroTag: 'refresh',
                   backgroundColor: Colors.white,
-                  child: const Icon(Icons.refresh, color: Colors.black87),
                   onPressed: _fetchTracking,
+                  child: const Icon(Icons.refresh, color: Colors.black87),
                 ),
               ],
             ),
@@ -289,7 +423,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                         color: const Color(0xFFE4E2F8),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(Icons.directions_bus, color: Color(0xFF5E43F3)),
+                      child: const Icon(Icons.directions_bus,
+                          color: Color(0xFF5E43F3)),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
@@ -299,20 +434,25 @@ class _TrackingScreenState extends State<TrackingScreen> {
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF5E43F3),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   widget.bus.busNo,
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ),
                               const SizedBox(width: 6),
                               const Text(
                                 '• Tap to view stops',
-                                style: TextStyle(fontSize: 11, color: Colors.grey),
+                                style:
+                                    TextStyle(fontSize: 11, color: Colors.grey),
                               ),
                             ],
                           ),
@@ -328,7 +468,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
                         ],
                       ),
                     ),
-                    const Icon(Icons.keyboard_arrow_up, color: Color(0xFF5E43F3)),
+                    const Icon(Icons.keyboard_arrow_up,
+                        color: Color(0xFF5E43F3)),
                   ],
                 ),
               ),
