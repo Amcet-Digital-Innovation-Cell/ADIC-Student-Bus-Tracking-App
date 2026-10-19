@@ -1,0 +1,61 @@
+name: Qlty Code Quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: qlty-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qlty-check:
+    name: Run Qlty Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qlty CLI
+        shell: bash
+        run: |
+          curl -fsSL https://qlty.sh | bash
+          echo "$HOME/.qlty/bin" >> "$GITHUB_PATH"
+
+      - name: Run Qlty checks
+        id: qlty
+        shell: bash
+        run: |
+          qlty check 2>&1 | tee qlty-output.txt
+          QLTY_EXIT=${PIPESTATUS[0]}
+          echo "exit_code=$QLTY_EXIT" >> "$GITHUB_OUTPUT"
+          exit $QLTY_EXIT
+
+      - name: Prepare PR comment content
+        if: always() && github.event_name == 'pull_request'
+        id: prep
+        shell: bash
+        run: |
+          {
+            echo 'result<<EOF'
+            cat qlty-output.txt
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post results as PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: mshick/add-pr-comment@v2
+        with:
+          message: |
+            ### 🔍 Qlty Code Quality Results
+            ```
+            ${{ steps.prep.outputs.result }}
+            ```
