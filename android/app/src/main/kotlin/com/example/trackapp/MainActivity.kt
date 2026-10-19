@@ -1,4 +1,4 @@
-package com.example.fluttermobileapp
+package com.example.trackapp
 
 import io.flutter.embedding.android.FlutterActivity
 

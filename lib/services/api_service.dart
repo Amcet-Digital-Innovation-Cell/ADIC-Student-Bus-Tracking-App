@@ -11,7 +11,7 @@ class ApiService {
   // Windows desktop / Chrome / Edge (flutter run on PC): http://localhost:3001
   // Android Emulator:                                    http://10.0.2.2:3001
   // Physical Android/iOS device (same Wi-Fi as PC):     http://10.228.166.103:3001
-  static const String baseUrl = 'http://localhost:3001';
+  static const String baseUrl = 'https://adic-bus-tracker.onrender.com';
   static const String endpoint = '/api/public/buses';
 
   static Future<List<BusRouteModel>> fetchRoutes({
