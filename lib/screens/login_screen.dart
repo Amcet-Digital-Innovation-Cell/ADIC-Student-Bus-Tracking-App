@@ -163,31 +163,31 @@ bool _isLoadingRoutes = false;
     setState(() {
       _isAutoFetching = true;
       _errorMessage = null;
+      _isStudentVerified = false; // Reset verification state
     });
 
     final result = await ApiService.fetchStudentPreview(cleanId);
 
-    if (!mounted) return;
-    setState(() => _isAutoFetching = false);
-
-    if (result['success'] == true) {
+if (result['success'] == true &&
+        (result['studentname'] as String).trim().isNotEmpty &&
+        (result['year'] as String).trim().isNotEmpty) {
       setState(() {
-        if ((result['studentname'] as String).isNotEmpty) {
-          _regStudentNameController.text = result['studentname'];
-        }
-        if ((result['year'] as String).isNotEmpty) {
-          _regYearController.text = result['year'];
-        }
-        _isStudentVerified = true;
+        _regStudentNameController.text = result['studentname'];
+        _regYearController.text = result['year'];
+        _isStudentVerified = true; // Verified successfully
       });
       FocusScope.of(context).requestFocus(_studentMobileFocus);
     } else {
-      // Backend response match aagaavittalum user-ai manual input seiya anumadhikkum
+      // Reject non-verified students
       setState(() {
-        _isStudentVerified = true;// ✅ Allow manual entry even if preview fails
-        _errorMessage = result['error'] ?? 'Record mismatch. Please enter Name & Year manually.';
+        _isStudentVerified = false;
+        _regStudentNameController.clear();
+        _regYearController.clear();
+        _errorMessage = result['error'] ?? 'Student record not found in college database.';
       });
+      _showBottomErrorSnackBar(_errorMessage!);
     }
+  
   }
 
   // Step 2: Form validation & Registration submission
@@ -204,7 +204,7 @@ bool _isLoadingRoutes = false;
 
     debugPrint('Field Check: ID=$studentId, Name=$studentName, Year=$academicYear, Dept=$_selectedDepartment, Route=$_selectedRoute');
 
-    if (studentId.isEmpty || !_isStudentVerified) {
+    if (studentId.isEmpty) {
       debugPrint('Validation failed: Student ID empty');
       _showBottomErrorSnackBar('Please enter/scan Student ID.');
       return;
@@ -253,6 +253,11 @@ bool _isLoadingRoutes = false;
     if (!mobileRegex.hasMatch(parentPhone)) {
       debugPrint('Validation failed: Parent mobile ($parentPhone) invalid');
       _showBottomErrorSnackBar('Enter a valid 10-digit Indian mobile number of Parent.');
+      return;
+    }
+    // Block non-verified students
+    if (!_isStudentVerified || studentName.isEmpty || academicYear.isEmpty) {
+      _showBottomErrorSnackBar('Student verification failed. Only pre-enrolled AMCET students can register.');
       return;
     }
 
@@ -923,7 +928,7 @@ void _showBottomSnackBar(String message) {
                 )
               : _buildScanIconAction(isRegistration: true),
           onChanged: (val) {
-            if (val.trim().length >= 6) {
+            if (val.trim().length >= 8) {
               _fetchStudentDetails(val);
             }
           },
@@ -947,9 +952,9 @@ void _showBottomSnackBar(String message) {
                     _buildInputField(
                       controller: _regStudentNameController,
                       focusNode: _regStudentNameFocus,
-                      hintText: _regStudentNameController.text.isNotEmpty ? _regStudentNameController.text : 'Enter Name',
+                      hintText: _regStudentNameController.text.isNotEmpty ? _regStudentNameController.text : 'Auto-fetched Name',
                       prefixIcon: Icons.badge_outlined,
-                      readOnly: false,
+                      readOnly: true,
                     ),
                   ],
                 ),
@@ -968,9 +973,9 @@ void _showBottomSnackBar(String message) {
                     _buildInputField(
                       controller: _regYearController,
                       focusNode: _regYearFocus,
-                      hintText: _regYearController.text.isNotEmpty ? _regYearController.text : 'Enter Year (e.g., III Year)',
+                      hintText: _regYearController.text.isNotEmpty ? _regYearController.text : 'Auto-fetched Year',
                       prefixIcon: Icons.calendar_today_rounded,
-                      readOnly: false,
+                      readOnly: true,
                     ),
                   ],
                 ),
@@ -1122,7 +1127,7 @@ void _showBottomSnackBar(String message) {
               ),
               const SizedBox(height: 7),
               Text(
-                '• Ensure your email address is valid; your Password will be sent there.\n• Use a 10-digit registered Indian mobile number for verification.\n• Select your allocated college bus route accurately.',
+                '• Incase You are facing Auto-fetch Issue, Reachout the College Transport Management \n• Ensure your email address is valid; your Password will be sent there.\n• Use a 10-digit registered Indian mobile number for verification.\n• Select your allocated college bus route accurately.',
                 style: TextStyle(
                   fontSize: 11.0,
                   height: 1.45,
@@ -1684,7 +1689,7 @@ Widget _buildDepartmentDropdown() {
                   style: TextStyle(
                     fontSize: 13.0,
                     fontWeight: FontWeight.w700,
-                    color: readOnly ? const Color(0xFF00E5FF) : Colors.white,
+                    color: readOnly ? const Color.fromARGB(255, 249, 249, 249) : Colors.white,
                     letterSpacing: 0.6,
                   ),
                   decoration: InputDecoration(

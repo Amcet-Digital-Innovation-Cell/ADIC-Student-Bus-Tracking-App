@@ -242,16 +242,16 @@ class _SplashScreenState extends State<SplashScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10.0, vertical: 3.5),
                         decoration: BoxDecoration(
-                          color: _homeDeepNavy.withValues(alpha: 0.85),
+                          color: const Color.fromARGB(0, 251, 251, 251).withValues(alpha: 0.01),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: _homeRoyalBlue.withValues(alpha: 0.45),
-                            width: 1.0,
+                            color: Color.fromARGB(182, 85, 54, 7),
+                            width: 0.7,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: _homeRoyalBlue.withValues(alpha: 0.10),
-                              blurRadius: 10,
+                              color: const Color.fromARGB(0, 220, 225, 226).withValues(alpha: 0.01),
+                              blurRadius: 6,
                             ),
                           ],
                         ),
@@ -260,7 +260,7 @@ class _SplashScreenState extends State<SplashScreen>
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: 'JetBrainsMono',
-                            color: Color(0xFF7DD3FC),
+                            color: Color.fromARGB(182, 148, 121, 82),
                             fontSize: 9.5,
                             letterSpacing: 2.2,
                             fontWeight: FontWeight.w700,
@@ -270,27 +270,27 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
 
                    // Spacer expands here so the logo & button get pushed down
-                    const Spacer(flex: 3),
+                    const Spacer(flex: 2),
 
                    // 4. Attribution Tag Reveal with Transparent ADIC Logo
 _buildStaggeredText(
   startInterval: 0.58,
   endInterval: 1.0,
-  child: Row(
-    mainAxisAlignment: MainAxisAlignment.center,
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.center,
     children: [
       Text(
         'POWERED BY',
         style: TextStyle(
           fontFamily: 'Inter',
-          color: Colors.white.withValues(alpha: 0.45),
+          color: Color.fromARGB(255, 161, 159, 157),
           fontSize: 8.8,
           letterSpacing: 1.8,
           fontWeight: FontWeight.w600,
         ),
       ),
-      const SizedBox(width: 1),
+      const SizedBox(height: 7),
       Image.asset(
         'assets/adic_logo.png',
         height: 98, // Sized proportionally to fit beside the attribution caption
