@@ -23,7 +23,7 @@ class AppTheme {
   // Refined Brand Colors
   static const Color darkNavy = Color(0xFF001E40);
   static const Color cyanBlue = Color(0xFF00658D);
-  static const Color accentCyan = Color(0xFF00D2FF);
+  static const Color accentCyan = Color.fromARGB(228, 0, 208, 255);
   static const Color subtleCyan = Color(0xFF00A3E0);
 
   // Palette Constants

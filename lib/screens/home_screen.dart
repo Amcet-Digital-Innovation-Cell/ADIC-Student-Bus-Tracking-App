@@ -654,7 +654,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 16),
-                            // Header row with route count aligned to edge with static neon border glow
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               crossAxisAlignment: CrossAxisAlignment.center,
@@ -670,7 +669,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                 ),
-                                // Edge-anchored static neon badge
                                 Padding(
                                   padding: const EdgeInsets.only(right: 12.0),
                                   child: Container(
@@ -685,20 +683,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(
                                         color: isDark
-                                            ? const Color(0xFF00E5FF).withValues(alpha: 0.90)
+                                            ? const Color.fromARGB(88, 0, 229, 255).withValues(alpha: 0.90)
                                             : const Color(0xFF0284C7).withValues(alpha: 0.85),
                                         width: 1.3,
                                       ),
                                       boxShadow: [
-                                        // Static Outer Neon Bloom
                                         BoxShadow(
                                           color: isDark
-                                              ? const Color(0xFF00E5FF).withValues(alpha: 0.38)
+                                              ? const Color.fromARGB(83, 0, 229, 255).withValues(alpha: 0.38)
                                               : const Color(0xFF0284C7).withValues(alpha: 0.28),
                                           blurRadius: 10,
                                           spreadRadius: 0.8,
                                         ),
-                                        // Specular highlight in light mode
                                         if (!isDark)
                                           BoxShadow(
                                             color: Colors.white.withValues(alpha: 0.85),
@@ -711,7 +707,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       '${_filteredRoutes.length} buses',
                                       style: TextStyle(
                                         color: isDark
-                                            ? const Color(0xFF00E5FF)
+                                            ? Colors.white.withValues(alpha: 0.85)
                                             : const Color(0xFF026AA3),
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -813,7 +809,6 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
   late final Animation<double> _fadeAnim;
   late final Animation<Offset> _slideUpAnim;
 
-  late final AnimationController _connectorPulseController;
   late final AnimationController _arrowLaunchController;
   late final Animation<double> _arrowLaunchAnim;
   bool _isNavigating = false;
@@ -843,11 +838,6 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
       if (mounted) _animController.forward();
     });
 
-    _connectorPulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat();
-
     _arrowLaunchController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 140),
@@ -864,7 +854,6 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
   @override
   void dispose() {
     _animController.dispose();
-    _connectorPulseController.dispose();
     _arrowLaunchController.dispose();
     super.dispose();
   }
@@ -986,8 +975,21 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
               ),
               const SizedBox(height: 14),
 
-              _DebossedNeumorphicStrip(
-                isDark: widget.isDark,
+              // Simple clean container without debossed neumorphic cavity
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: widget.isDark
+                      ? const Color(0xFF061423).withValues(alpha: 0.70)
+                      : const Color.fromARGB(131, 241, 245, 249),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: widget.isDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : const Color(0xFFE2E8F0),
+                    width: 1.0,
+                  ),
+                ),
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final double totalAvailableWidth = constraints.maxWidth;
@@ -997,10 +999,10 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
                     final double lastStopNaturalWidth =
                         _measureTextWidth(lastStop, stopTextStyle) + 4.0;
 
-                    const double minBeamWidth = 32.0;
+                    const double symbolWidth = 36.0;
                     const double fixedDotSpacing = 36.0;
                     final double maxAllowedForBothStops =
-                        (totalAvailableWidth - minBeamWidth - fixedDotSpacing)
+                        (totalAvailableWidth - symbolWidth - fixedDotSpacing)
                             .clamp(50.0, totalAvailableWidth);
 
                     final double maxPerSide = maxAllowedForBothStops / 2;
@@ -1021,15 +1023,12 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
                           height: 8,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFF00D2FF),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF00D2FF)
-                                    .withValues(alpha: 0.85),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ],
+                            border: Border.all(
+                              color: widget.isDark
+                                  ? Colors.white54
+                                  : Colors.black45,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -1043,27 +1042,28 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
                           ),
                         ),
 
+                        // Equilibrium symbol replacing continuous animated beam
                         Expanded(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: AnimatedBuilder(
-                              animation: _connectorPulseController,
-                              builder: (context, child) {
-                                return CustomPaint(
-                                  painter: _AnimatedRouteBeamPainter(
-                                    progress: _connectorPulseController.value,
-                                    isDark: widget.isDark,
-                                  ),
-                                  child: const SizedBox(height: 14),
-                                );
-                              },
+                          child: Center(
+                            child: _EquilibriumSymbol(
+                              isDark: widget.isDark,
+                              size: 18,
                             ),
+                          ),
+                        ),
+                      const SizedBox(width: 1),
+
+                        SizedBox(
+                          width: dynamicLastWidth,
+                          child: AutoScrollStopText(
+                            text: lastStop,
+                            textAlign: TextAlign.right,
+                            style: stopTextStyle,
                           ),
                         ),
 
                         Container(
-                          width: 8,
+                          width: 20,
                           height: 8,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
@@ -1075,16 +1075,7 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-
-                        SizedBox(
-                          width: dynamicLastWidth,
-                          child: AutoScrollStopText(
-                            text: lastStop,
-                            textAlign: TextAlign.right,
-                            style: stopTextStyle,
-                          ),
-                        ),
+                        
                       ],
                     );
                   },
@@ -1224,153 +1215,64 @@ class _AnimatedRouteCardState extends State<_AnimatedRouteCard>
   }
 }
 
-class _DebossedNeumorphicStrip extends StatelessWidget {
-  final Widget child;
+/// Clean equilibrium harpoon arrows symbol (⇌)
+class _EquilibriumSymbol extends StatelessWidget {
   final bool isDark;
+  final double size;
 
-  const _DebossedNeumorphicStrip({
-    required this.child,
+  const _EquilibriumSymbol({
     required this.isDark,
+    this.size = 18,
   });
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _DebossedInnerShadowPainter(isDark: isDark),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: child,
+    return SizedBox(
+      width: size * 1.6,
+      height: size,
+      child: CustomPaint(
+        painter: _EquilibriumPainter(isDark: isDark),
       ),
     );
   }
 }
 
-class _DebossedInnerShadowPainter extends CustomPainter {
+class _EquilibriumPainter extends CustomPainter {
   final bool isDark;
 
-  _DebossedInnerShadowPainter({required this.isDark});
+  const _EquilibriumPainter({required this.isDark});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final Rect rect = Offset.zero & size;
-    final RRect rrect =
-        RRect.fromRectAndRadius(rect, const Radius.circular(16));
+    final double w = size.width;
+    final double h = size.height;
 
-    final Paint cavityBasePaint = Paint()
-      ..color = isDark ? const Color(0xFF061423) : const Color(0xFFDFE7F0);
-    canvas.drawRRect(rrect, cavityBasePaint);
+    final Color arrowColor = isDark
+        ? const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.85)
+        : const Color(0xFF00658D).withValues(alpha: 0.85);
 
-    canvas.save();
-    canvas.clipRRect(rrect);
+    final Paint paint = Paint()
+      ..color = arrowColor
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
 
-    final Path outerBounds = Path()..addRect(rect.inflate(30));
+    final double topY = h * 0.32;
+    final double bottomY = h * 0.68;
+    final double barbLength = w * 0.22;
 
-    final Paint darkShadowPaint = Paint()
-      ..color = isDark
-          ? Colors.black.withValues(alpha: 0.92)
-          : const Color(0xFF7A8B9C).withValues(alpha: 0.75)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5.0);
+    // Top arrow (points right with top barb)
+    canvas.drawLine(Offset(0, topY), Offset(w, topY), paint);
+    canvas.drawLine(Offset(w - barbLength, topY - (h * 0.24)), Offset(w, topY), paint);
 
-    final Path shiftedDark = Path()
-      ..addRRect(rrect.shift(const Offset(3.5, 4.0)));
-    final Path darkShadowPath =
-        Path.combine(PathOperation.difference, outerBounds, shiftedDark);
-    canvas.drawPath(darkShadowPath, darkShadowPaint);
-
-    final Paint creasePaint = Paint()
-      ..color = isDark
-          ? Colors.black.withValues(alpha: 0.98)
-          : const Color(0xFF5A6C7E).withValues(alpha: 0.55)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8);
-
-    final Path shiftedCrease = Path()
-      ..addRRect(rrect.shift(const Offset(1.5, 2.0)));
-    final Path creasePath =
-        Path.combine(PathOperation.difference, outerBounds, shiftedCrease);
-    canvas.drawPath(creasePath, creasePaint);
-
-    final Paint lightHighlightPaint = Paint()
-      ..color = isDark
-          ? const Color(0xFF1B456F).withValues(alpha: 0.40)
-          : Colors.white.withValues(alpha: 0.95)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-
-    final Path shiftedLight = Path()
-      ..addRRect(rrect.shift(const Offset(-3.0, -3.0)));
-    final Path lightHighlightPath =
-        Path.combine(PathOperation.difference, outerBounds, shiftedLight);
-    canvas.drawPath(lightHighlightPath, lightHighlightPaint);
-
-    final Paint rimLinePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = isDark
-          ? Colors.black.withValues(alpha: 0.45)
-          : Colors.black.withValues(alpha: 0.06);
-    canvas.drawRRect(rrect, rimLinePaint);
-
-    canvas.restore();
+    // Bottom arrow (points left with bottom barb)
+    canvas.drawLine(Offset(w, bottomY), Offset(0, bottomY), paint);
+    canvas.drawLine(Offset(barbLength, bottomY + (h * 0.24)), Offset(0, bottomY), paint);
   }
 
   @override
-  bool shouldRepaint(covariant _DebossedInnerShadowPainter oldDelegate) =>
+  bool shouldRepaint(covariant _EquilibriumPainter oldDelegate) =>
       oldDelegate.isDark != isDark;
-}
-
-class _AnimatedRouteBeamPainter extends CustomPainter {
-  final double progress;
-  final bool isDark;
-
-  _AnimatedRouteBeamPainter({required this.progress, required this.isDark});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final double midY = size.height / 2;
-
-    final Paint trackPaint = Paint()
-      ..color = isDark
-          ? const Color(0xFF00D2FF).withValues(alpha: 0.18)
-          : const Color(0xFF00658D).withValues(alpha: 0.20)
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(Offset(0, midY), Offset(size.width, midY), trackPaint);
-
-    final double particleX = size.width * progress;
-
-    final Paint tailPaint = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          Colors.transparent,
-          (isDark ? const Color(0xFF00D2FF) : const Color(0xFF0073A8))
-              .withValues(alpha: 0.85),
-        ],
-      ).createShader(Rect.fromLTWH(
-          (particleX - 24).clamp(0.0, size.width), midY - 2, 24, 4))
-      ..strokeWidth = 2.5
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(
-      Offset((particleX - 22).clamp(0.0, size.width), midY),
-      Offset(particleX, midY),
-      tailPaint,
-    );
-
-    final Paint particleGlow = Paint()
-      ..color = const Color(0xFF00D2FF).withValues(alpha: 0.85)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
-
-    final Paint particleCore = Paint()
-      ..color = isDark ? Colors.white : const Color(0xFF00A3E0)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawCircle(Offset(particleX, midY), 3.5, particleGlow);
-    canvas.drawCircle(Offset(particleX, midY), 2.2, particleCore);
-  }
-
-  @override
-  bool shouldRepaint(covariant _AnimatedRouteBeamPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.isDark != isDark;
 }
 
 class _SolidChevronArrow extends StatelessWidget {
