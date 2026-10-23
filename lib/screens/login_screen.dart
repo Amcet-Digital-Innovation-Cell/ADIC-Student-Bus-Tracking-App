@@ -68,6 +68,7 @@ bool _isLoadingRoutes = false;
   bool _isStudentVerified = false;
   bool _isDepartmentDropdownOpen = false;
   String? _errorMessage;
+  int _latestFetchRequestId = 0;
 
   static const Color _deepBackground = Color(0xFF040A12);
   static const double _targetLogoSize = 76.0;
@@ -155,40 +156,80 @@ bool _isLoadingRoutes = false;
     super.dispose();
   }
 
-  // Step 1: Auto-Fetch student Name & Year
   Future<void> _fetchStudentDetails(String studentId) async {
-    final cleanId = studentId.trim().toUpperCase();
-    if (cleanId.length < 5) return;
+  final cleanId = studentId.trim().toUpperCase();
 
-    setState(() {
-      _isAutoFetching = true;
-      _errorMessage = null;
-      _isStudentVerified = false; // Reset verification state
-    });
+  // If user deletes characters below 5, reset status & clear fields immediately
+  if (cleanId.length < 5) {
+    if (mounted) {
+      setState(() {
+        _isAutoFetching = false;
+        _isStudentVerified = false;
+        _errorMessage = null;
+        _regStudentNameController.clear();
+        _regYearController.clear();
+      });
+    }
+    return;
+  }
 
+  // Increment ID so old in-flight requests get discarded
+  final int currentRequestId = ++_latestFetchRequestId;
+
+  setState(() {
+    _isAutoFetching = true;
+    _errorMessage = null;
+    _isStudentVerified = false; // Reset verification while re-fetching
+  });
+
+  try {
     final result = await ApiService.fetchStudentPreview(cleanId);
 
-if (result['success'] == true &&
-        (result['studentname'] as String).trim().isNotEmpty &&
-        (result['year'] as String).trim().isNotEmpty) {
+    // Discard if user continued editing while network call was pending
+    if (!mounted || currentRequestId != _latestFetchRequestId) return;
+
+    if (result['success'] == true &&
+        (result['studentname'] ?? '').toString().trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+
       setState(() {
-        _regStudentNameController.text = result['studentname'];
-        _regYearController.text = result['year'];
-        _isStudentVerified = true; // Verified successfully
+        _errorMessage = null;
+        _regStudentNameController.text = result['studentname'] ?? '';
+        
+        final rawYear = (result['year'] ?? '').toString();
+        _regYearController.text = rawYear.endsWith('.0') 
+            ? rawYear.replaceAll('.0', '') 
+            : rawYear;
+
+        _isStudentVerified = true;
       });
-      FocusScope.of(context).requestFocus(_studentMobileFocus);
+      // Do NOT force requestFocus here if the user is actively editing
     } else {
-      // Reject non-verified students
       setState(() {
         _isStudentVerified = false;
         _regStudentNameController.clear();
         _regYearController.clear();
-        _errorMessage = result['error'] ?? 'Student record not found in college database.';
+        _errorMessage = result['error'] ?? 'Student record not found in college records.';
       });
-      _showBottomErrorSnackBar(_errorMessage!);
     }
-  
+  } catch (e) {
+    debugPrint('[Fetch Error] $e');
+    if (mounted && currentRequestId == _latestFetchRequestId) {
+      setState(() {
+        _isStudentVerified = false;
+        _regStudentNameController.clear();
+        _regYearController.clear();
+        _errorMessage = 'Network error verifying student ID.';
+      });
+    }
+  } finally {
+    if (mounted && currentRequestId == _latestFetchRequestId) {
+      setState(() {
+        _isAutoFetching = false;
+      });
+    }
   }
+}
 
   // Step 2: Form validation & Registration submission
   Future<void> _handleRegistration() async {
@@ -2029,7 +2070,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Log-in to access your assigned college bus',
+                              'Scan Your ID Card',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontStyle: FontStyle.italic,
@@ -2115,23 +2156,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                           onDetect: _onDetect,
                         ),
                         Center(
-                          child: Container(
-                            width: 175,
-                            height: 135,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: const Color.fromARGB(255, 1, 255, 255),
-                                width: 1.3,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF00E5FF).withValues(alpha: 0.25),
-                                  blurRadius: 2,
-                                ),
-                              ],
-                            ),
-                          ),
+                          
                         ),
                       ],
                     ),
@@ -2139,7 +2164,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                 ),
                 const SizedBox(height: 19),
                 Text(
-                  'Scan your Student ID QR code to auto-fill the login form.',
+                  'Place your ID Card QR to Auto-fill Student ID.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontStyle: FontStyle.italic,
