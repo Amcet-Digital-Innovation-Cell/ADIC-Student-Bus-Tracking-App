@@ -1,7 +1,8 @@
-import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../services/api_service.dart';
+import 'login_screen.dart';
 import 'home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -20,11 +21,16 @@ class _SplashScreenState extends State<SplashScreen>
   static const Color _navyBackground = Color(0xFF070E18);
   static const Color _homeRoyalBlue = Color(0xFF005175);
   static const Color _homeDeepNavy = Color(0xFF06101E);
+  static const double _fixedLogoSize = 200.0;
+
+  bool _isVerificationComplete = false;
+  bool _isSessionValid = false;
+  bool _hasNavigated = false;
 
   @override
   void initState() {
     super.initState();
-    // Entry text reveals
+
     _textAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
@@ -40,6 +46,50 @@ class _SplashScreenState extends State<SplashScreen>
       parent: _neonGlowController,
       curve: Curves.easeInOutSine,
     );
+
+    _evaluateSession();
+  }
+
+  Future<void> _evaluateSession() async {
+    final bool loggedIn = await ApiService.isLoggedIn();
+    if (!mounted) return;
+
+    setState(() {
+      _isVerificationComplete = true;
+      _isSessionValid = loggedIn;
+    });
+
+  }
+
+  void _proceedToNextScreen() {
+    if (_hasNavigated || !mounted) return;
+    _hasNavigated = true;
+
+    if (_isSessionValid) {
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 750),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const HomeScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    } else {
+      Navigator.pushReplacement(
+        context,
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 750),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const LoginScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    }
   }
 
   @override
@@ -109,26 +159,33 @@ class _SplashScreenState extends State<SplashScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Spacer(flex: 1),
+                    const Spacer(flex: 2),
                     const SizedBox(height: 11),
 
                     // Center Logo
                     Center(
-                      child: Image.asset(
-                        'assets/logo.png',
-                        width: 210,
-                        height: 210,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Icon(
-                          Icons.directions_bus_rounded,
-                          size: 70,
-                          color: Colors.amber,
+                      child: SizedBox(
+                        width: _fixedLogoSize,
+                        height: _fixedLogoSize,
+                        child: Hero(
+                          tag: 'app_college_logo',
+                          child: Image.asset(
+                            'assets/logo.png',
+                            width: _fixedLogoSize,
+                            height: _fixedLogoSize,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Icon(
+                              Icons.directions_bus_rounded,
+                              size: 70,
+                              color: Colors.amber,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-
-                    const SizedBox(height: 98),
+                    const SizedBox(height: 99),
 
                     // 1. Primary Title Reveal
                     _buildStaggeredText(
@@ -175,7 +232,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 25),
 
                     // 3. Version Tag Pill Reveal
                     _buildStaggeredText(
@@ -188,12 +245,12 @@ class _SplashScreenState extends State<SplashScreen>
                           color: _homeDeepNavy.withValues(alpha: 0.85),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: const Color(0xFF00E5FF).withValues(alpha: 0.45),
+                            color: _homeRoyalBlue.withValues(alpha: 0.45),
                             width: 1.0,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF00E5FF).withValues(alpha: 0.10),
+                              color: _homeRoyalBlue.withValues(alpha: 0.10),
                               blurRadius: 10,
                             ),
                           ],
@@ -212,59 +269,49 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 18),
-
-                    // 4. Attribution Tag Reveal
-                    _buildStaggeredText(
-                      startInterval: 0.58,
-                      endInterval: 1.0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'DESIGNED BY',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              color: Colors.white.withValues(alpha: 0.45),
-                              fontSize: 8.5,
-                              letterSpacing: 1.8,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2.0),
-                            decoration: BoxDecoration(
-                              color: _homeRoyalBlue.withValues(alpha: 0.35),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                color: const Color(0xFF00E5FF).withValues(alpha: 0.45),
-                                width: 0.8,
-                              ),
-                            ),
-                            child: const Text(
-                              'ADIC',
-                              style: TextStyle(
-                                fontFamily: 'Montserrat',
-                                color: Color.fromARGB(255, 47, 193, 255),
-                                fontSize: 10.5,
-                                letterSpacing: 1.6,
-                                fontWeight: FontWeight.w800,
-                                shadows: [
-                                  Shadow(
-                                    color: Color.fromARGB(55, 0, 229, 255),
-                                    blurRadius: 5,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
+                   // Spacer expands here so the logo & button get pushed down
                     const Spacer(flex: 3),
+
+                   // 4. Attribution Tag Reveal with Transparent ADIC Logo
+_buildStaggeredText(
+  startInterval: 0.58,
+  endInterval: 1.0,
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      Text(
+        'POWERED BY',
+        style: TextStyle(
+          fontFamily: 'Inter',
+          color: Colors.white.withValues(alpha: 0.45),
+          fontSize: 8.8,
+          letterSpacing: 1.8,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(width: 1),
+      Image.asset(
+        'assets/adic_logo.png',
+        height: 98, // Sized proportionally to fit beside the attribution caption
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (context, error, stackTrace) => const Text(
+          'ADIC',
+          style: TextStyle(
+            fontFamily: 'Montserrat',
+            color: Color(0xFF00E5FF),
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+          ),
+        ),
+      ),
+    ],
+  ),
+),
+
+                    const SizedBox(height: 18),
 
                     // Frosted Glassmorphic Button
                     Padding(
@@ -310,11 +357,11 @@ class _SplashScreenState extends State<SplashScreen>
                                 color: Colors.transparent,
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(26),
-                                  onTap: () {
-                                    Navigator.pushReplacement(
-                                      context,
-                                      smoothPageRoute(page: const HomeScreen()),
-                                    );
+                                  onTap: () async {
+                                    if (!_isVerificationComplete) {
+                                      await _evaluateSession();
+                                    }
+                                    _proceedToNextScreen();
                                   },
                                   child: const Center(
                                     child: Row(
@@ -397,6 +444,7 @@ class _NeonSlitLogoFramePainter extends CustomPainter {
       topColor: const Color(0xFF142133),
       bottomColor: const Color(0xFF0B1420),
     );
+    // Static lower-left perimeter edge accent
     _drawGlowingNeonLine(
       canvas,
       Offset(w * 0.40, 0),
@@ -419,6 +467,7 @@ class _NeonSlitLogoFramePainter extends CustomPainter {
       topColor: const Color(0xFF132032),
       bottomColor: const Color(0xFF09121E),
     );
+    // Static lower-right perimeter edge accent
     _drawGlowingNeonLine(
       canvas,
       Offset(w, h * 0.25),
@@ -434,9 +483,7 @@ class _NeonSlitLogoFramePainter extends CustomPainter {
       baseIntensity: 0.60,
     );
 
-    // --- BOTTOM SECTOR PANELS & NON-INTERFERING SEAMS ---
-
-    // Plate C: Lower-left blade framing the bottom-left edge
+    // Plate C: Lower left base panel
     final Path bottomPlateLeft = Path()
       ..moveTo(0, h * 0.60)
       ..lineTo(w * 0.28, h * 0.65)

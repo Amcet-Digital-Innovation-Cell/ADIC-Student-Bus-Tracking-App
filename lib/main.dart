@@ -2,13 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/theme_controller.dart'; // or your path to theme_controller.dart
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Restore saved dark/light mode preference from local storage
-  await AppTheme.initTheme();
-
+  WidgetsFlutterBinding.ensureInitialized(); // Initialize theme settings
   runApp(const StudentBusApp());
 }
 
@@ -31,6 +29,7 @@ class StudentBusApp extends StatelessWidget {
           initialRoute: '/',
           routes: {
             '/': (context) => const SplashScreen(),
+            '/login': (context) => const LoginScreen(),
             '/home': (context) => const HomeScreen(),
           },
           scrollBehavior: const MaterialScrollBehavior().copyWith(
