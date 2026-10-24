@@ -1,8 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -36,13 +40,27 @@ class _TrackingScreenState extends State<TrackingScreen>
 
   late final AnimationController _radarController;
   late final AnimationController _waveSignalController;
+  late final AnimationController _transitRippleController;
   late final bool _computedEveningMode;
+  late Timer _freshnessTicker;
 
   LatLng? _markerLocation = _initialLocation;
-  double _headingDegrees = 0.0;
   VehicleTrackingModel? _tracking;
   io.Socket? _socket;
   String? _errorMessage;
+  String _activeVehicleId = '';
+
+  // Freshness & 60-second polling cycle counters
+  int _secondsSinceLastUpdate = 0;
+  int _secondsUntilNextPing = 60;
+  bool _isFetching = false;
+
+  // Direction navigation state
+  bool _isDirectionModeActive = false;
+  LatLng? _userLocation;
+  StreamSubscription<Position>? _positionStreamSub;
+  List<LatLng> _navigationPolyline = [];
+  bool _isLoadingRoute = false;
 
   @override
   void initState() {
@@ -59,13 +77,61 @@ class _TrackingScreenState extends State<TrackingScreen>
       duration: const Duration(milliseconds: 3000),
     )..repeat();
 
+    _transitRippleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat();
+
+    _activeVehicleId = widget.bus.busNo.isNotEmpty
+        ? widget.bus.busNo
+        : widget.bus.id;
+
+    _initSocketAlways(_activeVehicleId);
     _fetchTracking();
+
+    _freshnessTicker = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) {
+        if (!mounted) return;
+
+        setState(() {
+          _secondsSinceLastUpdate++;
+
+          if (_secondsUntilNextPing > 0) {
+            _secondsUntilNextPing--;
+          } else {
+            if (!_isFetching) {
+              _fetchTracking();
+            }
+          }
+
+          _adjustRadarHeartbeat();
+        });
+      },
+    );
+  }
+
+  void _resetFreshnessTimer() {
+    _secondsSinceLastUpdate = 0;
+    _secondsUntilNextPing = 60;
+    _adjustRadarHeartbeat();
+  }
+
+  void _adjustRadarHeartbeat() {
+    final double agingRatio = (_secondsSinceLastUpdate / 60.0).clamp(0.0, 1.0);
+    final int newDurationMs = (1800 + (agingRatio * 2000)).toInt();
+    if ((_radarController.duration?.inMilliseconds ?? 2000) != newDurationMs) {
+      _radarController.duration = Duration(milliseconds: newDurationMs);
+    }
   }
 
   @override
   void dispose() {
+    _freshnessTicker.cancel();
+    _positionStreamSub?.cancel();
     _radarController.dispose();
     _waveSignalController.dispose();
+    _transitRippleController.dispose();
     _socket?.disconnect();
     _socket?.destroy();
     super.dispose();
@@ -76,26 +142,20 @@ class _TrackingScreenState extends State<TrackingScreen>
     return now.hour >= 12;
   }
 
-  double _calculateBearing(LatLng start, LatLng end) {
-    final double startLat = start.latitude * (math.pi / 180.0);
-    final double startLng = start.longitude * (math.pi / 180.0);
-    final double endLat = end.latitude * (math.pi / 180.0);
-    final double endLng = end.longitude * (math.pi / 180.0);
-
-    final double dLng = endLng - startLng;
-    final double y = math.sin(dLng) * math.cos(endLat);
-    final double x = math.cos(startLat) * math.sin(endLat) -
-        math.sin(startLat) * math.cos(endLat) * math.cos(dLng);
-
-    return (math.atan2(y, x) * 180.0 / math.pi + 360.0) % 360.0;
-  }
-
   double _toDouble(dynamic val) {
     if (val is num) return val.toDouble();
     return double.tryParse(val?.toString() ?? '0') ?? 0.0;
   }
 
-  void _initSocket(String vehicleId) {
+  void _initSocketAlways(String vehicleId) {
+    if (vehicleId.isEmpty) return;
+    _activeVehicleId = vehicleId;
+
+    if (_socket != null && _socket!.connected) {
+      _socket!.emit('joinVehicle', _activeVehicleId);
+      return;
+    }
+
     _socket?.disconnect();
     _socket?.destroy();
 
@@ -104,55 +164,69 @@ class _TrackingScreenState extends State<TrackingScreen>
       io.OptionBuilder()
           .setTransports(['websocket', 'polling'])
           .enableAutoConnect()
+          .enableReconnection()
           .setReconnectionDelay(1000)
           .setReconnectionDelayMax(5000)
           .build(),
     );
 
-    _socket!.onConnect((_) => _socket!.emit('joinVehicle', vehicleId));
+    _socket!.onConnect((_) {
+      _socket!.emit('joinVehicle', _activeVehicleId);
+      if (mounted) setState(() => _errorMessage = null);
+    });
+
+    _socket!.onReconnect((_) {
+      _socket!.emit('joinVehicle', _activeVehicleId);
+      if (mounted) setState(() => _errorMessage = null);
+    });
 
     _socket!.onDisconnect((_) {
       if (mounted) {
-        setState(() => _errorMessage = 'Connection lost. Reconnecting…');
+        setState(() => _errorMessage = 'Reconnecting live socket…');
       }
     });
 
     _socket!.on('busLocationUpdated', (data) {
       if (!mounted || data == null) return;
-      if (data['vehicleNumber']?.toString().toUpperCase() !=
-          vehicleId.toUpperCase()) {
+
+      final incomingVehicle = (data['vehicleNumber'] ??
+              data['vehicleId'] ??
+              data['busNo'] ??
+              '')
+          .toString();
+
+      if (incomingVehicle.isNotEmpty &&
+          incomingVehicle.toUpperCase() != _activeVehicleId.toUpperCase() &&
+          incomingVehicle.toUpperCase() != widget.bus.id.toUpperCase() &&
+          incomingVehicle.toUpperCase() != widget.bus.busNo.toUpperCase()) {
         return;
       }
 
       final double lat = _toDouble(data['latitude']);
       final double lng = _toDouble(data['longitude']);
-      final LatLng newLocation = LatLng(lat, lng);
-      final bool ignitionOn = VehicleTrackingModel.fromJson({
-        'vehicleId': vehicleId,
-        'latitude': lat,
-        'longitude': lng,
-        'updatedAt': data['receivedAt']?.toString() ??
-            data['gpsActualTime']?.toString() ??
-            DateTime.now().toUtc().toIso8601String(),
-        'ignitionOn':
-            data['ignitionOn'] ?? data['ignition'] ?? data['isIgnitionOn'],
-        'rawStatus': data['rawStatus'] ?? data['status'],
-      }).isIgnitionOn;
+      if (lat == 0.0 || lng == 0.0) return;
 
-      final dynamic rawBearing =
-          data['bearing'] ?? data['heading'] ?? data['course'];
-      if (rawBearing != null) {
-        _headingDegrees = _toDouble(rawBearing) % 360.0;
-      } else if (_markerLocation != null &&
-          (_markerLocation!.latitude != lat ||
-              _markerLocation!.longitude != lng)) {
-        _headingDegrees = _calculateBearing(_markerLocation!, newLocation);
-      }
+      final LatLng newLocation = LatLng(lat, lng);
+      final bool ignitionOn = data['ignitionOn'] ??
+          data['ignition'] ??
+          data['isIgnitionOn'] ??
+          VehicleTrackingModel.fromJson({
+            'vehicleId': _activeVehicleId,
+            'latitude': lat,
+            'longitude': lng,
+            'updatedAt': data['receivedAt']?.toString() ??
+                data['gpsActualTime']?.toString() ??
+                DateTime.now().toUtc().toIso8601String(),
+            'ignitionOn':
+                data['ignitionOn'] ?? data['ignition'] ?? data['isIgnitionOn'],
+            'rawStatus': data['rawStatus'] ?? data['status'],
+          }).isIgnitionOn;
 
       setState(() {
+        _resetFreshnessTimer();
         _tracking = VehicleTrackingModel(
           routeId: widget.bus.id,
-          vehicleId: vehicleId,
+          vehicleId: _activeVehicleId,
           latitude: lat,
           longitude: lng,
           updatedAt: DateTime.tryParse(
@@ -171,12 +245,18 @@ class _TrackingScreenState extends State<TrackingScreen>
         _errorMessage =
             ignitionOn ? null : 'Ignition off – live tracking paused';
       });
-      _animatedMapMove(newLocation, 17.2);
+
+      if (_isDirectionModeActive && _userLocation != null) {
+        _fetchDirectionsRoute(_userLocation!, newLocation);
+      } else {
+        _animatedMapMove(newLocation, 17.2);
+      }
     });
   }
 
   Future<void> _fetchTracking() async {
-    setState(() => _errorMessage = null);
+    if (_isFetching) return;
+    _isFetching = true;
 
     try {
       final tracking = await ApiService.fetchVehicleTracking(
@@ -188,27 +268,29 @@ class _TrackingScreenState extends State<TrackingScreen>
 
       if (tracking != null) {
         final LatLng newLoc = LatLng(tracking.latitude, tracking.longitude);
-        if (_markerLocation != null &&
-            (_markerLocation!.latitude != tracking.latitude ||
-                _markerLocation!.longitude != tracking.longitude)) {
-          _headingDegrees = _calculateBearing(_markerLocation!, newLoc);
-        }
 
         setState(() {
+          _resetFreshnessTimer();
           _tracking = tracking;
           _markerLocation = newLoc;
           _errorMessage = tracking.isTrackingActive
               ? null
               : 'Ignition off – live tracking paused';
         });
-        _animatedMapMove(newLoc, 17.2);
 
-        if (tracking.vehicleId.isNotEmpty && tracking.isTrackingActive) {
-          _initSocket(tracking.vehicleId);
+        if (_isDirectionModeActive && _userLocation != null) {
+          _fetchDirectionsRoute(_userLocation!, newLoc);
         } else {
-          _socket?.disconnect();
-          _socket?.destroy();
-          _socket = null;
+          _animatedMapMove(newLoc, 17.2);
+        }
+
+        final targetId = tracking.vehicleId.isNotEmpty
+            ? tracking.vehicleId
+            : _activeVehicleId;
+        if (_socket == null || !_socket!.connected) {
+          _initSocketAlways(targetId);
+        } else if (targetId.toUpperCase() != _activeVehicleId.toUpperCase()) {
+          _initSocketAlways(targetId);
         }
       } else {
         setState(() {
@@ -224,7 +306,145 @@ class _TrackingScreenState extends State<TrackingScreen>
             ? 'Unable to fetch live data – showing last known location.'
             : 'Unable to fetch live data.';
       });
+    } finally {
+      if (mounted) {
+        _isFetching = false;
+      }
     }
+  }
+
+  // Toggle user live location stream and road direction polyline
+  Future<void> _toggleDirectionMode() async {
+    if (_isDirectionModeActive) {
+      await _positionStreamSub?.cancel();
+      _positionStreamSub = null;
+      setState(() {
+        _isDirectionModeActive = false;
+        _userLocation = null;
+        _navigationPolyline = [];
+      });
+      if (_markerLocation != null) {
+        _animatedMapMove(_markerLocation!, 17.2);
+      }
+      return;
+    }
+
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enable location services on your device.')),
+        );
+      }
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permission is required for directions.')),
+          );
+        }
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location permissions are permanently denied.')),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isDirectionModeActive = true;
+      _isLoadingRoute = true;
+    });
+
+    try {
+      final initialPos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final LatLng myLoc = LatLng(initialPos.latitude, initialPos.longitude);
+
+      if (!mounted) return;
+      setState(() => _userLocation = myLoc);
+
+      if (_markerLocation != null) {
+        await _fetchDirectionsRoute(myLoc, _markerLocation!);
+        _fitBoundsBetween(myLoc, _markerLocation!);
+      }
+    } catch (_) {}
+
+    _positionStreamSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen((Position pos) {
+      if (!mounted) return;
+      final LatLng updatedLoc = LatLng(pos.latitude, pos.longitude);
+      setState(() => _userLocation = updatedLoc);
+
+      if (_markerLocation != null) {
+        _fetchDirectionsRoute(updatedLoc, _markerLocation!);
+      }
+    });
+  }
+
+  // Request actual driving/transit road geometry from OpenStreetMap OSRM API
+  Future<void> _fetchDirectionsRoute(LatLng start, LatLng dest) async {
+    final String url =
+        'https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson';
+
+    try {
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        final routes = decoded['routes'] as List<dynamic>?;
+        if (routes != null && routes.isNotEmpty) {
+          final coordinates = routes[0]['geometry']['coordinates'] as List<dynamic>;
+          final List<LatLng> path = coordinates
+              .map((coord) => LatLng(coord[1] as double, coord[0] as double))
+              .toList();
+
+          if (mounted) {
+            setState(() {
+              _navigationPolyline = path;
+              _isLoadingRoute = false;
+            });
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // Fallback straight vector path if network times out
+    if (mounted) {
+      setState(() {
+        _navigationPolyline = [start, dest];
+        _isLoadingRoute = false;
+      });
+    }
+  }
+
+  void _fitBoundsBetween(LatLng p1, LatLng p2) {
+    final bounds = LatLngBounds(
+      LatLng(math.min(p1.latitude, p2.latitude), math.min(p1.longitude, p2.longitude)),
+      LatLng(math.max(p1.latitude, p2.latitude), math.max(p1.longitude, p2.longitude)),
+    );
+
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 120),
+      ),
+    );
   }
 
   void _animatedMapMove(LatLng destLocation, double destZoom) {
@@ -270,8 +490,7 @@ class _TrackingScreenState extends State<TrackingScreen>
     controller.forward();
   }
 
-  void _showStopsModal(
-      BuildContext context, BusRouteModel bus, bool isEvening) {
+  void _showStopsModal(BuildContext context, BusRouteModel bus, bool isEvening) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -296,6 +515,22 @@ class _TrackingScreenState extends State<TrackingScreen>
           ? Colors.white.withValues(alpha: 0.08)
           : const Color(0xFFF1F5F9),
     );
+  }
+
+  String _buildFreshnessSubtitle() {
+    if (_errorMessage != null) return _errorMessage!;
+    if (_tracking != null && !_tracking!.isTrackingActive) {
+      return 'Ignition off – live tracking paused';
+    }
+
+    if (_isFetching) {
+      return 'Syncing satellite GPS ping…';
+    }
+
+    if (_secondsUntilNextPing > 0) {
+      return 'Updated ${_secondsSinceLastUpdate}s ago • Next ping in ${_secondsUntilNextPing}s';
+    }
+    return 'Syncing satellite GPS ping…';
   }
 
   @override
@@ -333,27 +568,61 @@ class _TrackingScreenState extends State<TrackingScreen>
                     userAgentPackageName: 'com.amcet.bustracking',
                     maxZoom: 19,
                   ),
+
+                  // Dynamic Directions Polyline
+                  if (_navigationPolyline.isNotEmpty)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: _navigationPolyline,
+                          strokeWidth: 4.8,
+                          color: const ui.Color.fromARGB(255, 2, 6, 136),
+                          borderColor: const ui.Color.fromARGB(76, 0, 34, 255),
+                          borderStrokeWidth: 2.0,
+                        ),
+                      ],
+                    ),
+
+                  // Active In-Transit Ripple Indicator and Markers
                   MarkerLayer(
                     markers: [
+                      // Bus Marker Ripple
                       Marker(
                         point: _markerLocation ?? _initialLocation,
-                        width: 66,
-                        height: 66,
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween<double>(begin: 0, end: _headingDegrees),
-                          duration: const Duration(milliseconds: 500),
-                          curve: Curves.easeOutCubic,
-                          builder: (context, angle, child) {
-                            return _buildRadarAnimatedMarker(isDark);
-                          },
+                        width: 80,
+                        height: 80,
+                        child: AnimatedBuilder(
+                          animation: _transitRippleController,
+                          builder: (context, _) => CustomPaint(
+                            painter: _InTransitRadarRingPainter(
+                              progress: _transitRippleController.value,
+                              isDark: isDark,
+                              isMoving: _tracking?.isTrackingActive ?? true,
+                            ),
+                          ),
                         ),
                       ),
+                      // Main Bus Marker
+                      Marker(
+                        point: _markerLocation ?? _initialLocation,
+                        width: 72,
+                        height: 72,
+                        child: _buildRadarAnimatedMarker(isDark),
+                      ),
+                      // Real-time Current User Location Marker
+                      if (_userLocation != null)
+                        Marker(
+                          point: _userLocation!,
+                          width: 48,
+                          height: 48,
+                          child: _buildUserLocationMarker(),
+                        ),
                     ],
                   ),
                 ],
               ),
 
-              // Top Status Bar with Signal Wave Background
+              // Top Status Bar
               Positioned(
                 top: 33,
                 left: 13,
@@ -420,7 +689,6 @@ class _TrackingScreenState extends State<TrackingScreen>
                                   ),
                                 ),
                               ),
-                              // Signal telemetry waves
                               Positioned.fill(
                                 child: AnimatedBuilder(
                                   animation: _waveSignalController,
@@ -465,29 +733,34 @@ class _TrackingScreenState extends State<TrackingScreen>
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           Text(
-                                            _computedEveningMode
-                                                ? 'EVENING (TO HOME)'
-                                                : 'MORNING (TO COLLEGE)',
+                                            _isDirectionModeActive
+                                                ? 'LIVE ROUTE NAVIGATION'
+                                                : (_computedEveningMode
+                                                    ? 'EVENING (TO HOME)'
+                                                    : 'MORNING (TO COLLEGE)'),
                                             style: TextStyle(
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
-                                              color: textTitle,
+                                              color: _isDirectionModeActive
+                                                  ? const Color(0xFF00E5FF)
+                                                  : textTitle,
                                               letterSpacing: 0.6,
                                             ),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            _errorMessage ??
-                                                (_tracking?.isTrackingActive ??
-                                                        false
-                                                    ? 'Live GPS tracking active'
-                                                    : 'Ignition off – live tracking paused'),
+                                            _isLoadingRoute
+                                                ? 'Calculating fastest road route…'
+                                                : _buildFreshnessSubtitle(),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
                                               fontSize: 11,
-                                              color: textSub,
-                                              fontWeight: FontWeight.w500,
+                                              color: _isFetching ||
+                                                      _secondsUntilNextPing == 0
+                                                  ? const Color(0xFF00E5FF)
+                                                  : textSub,
+                                              fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ],
@@ -517,7 +790,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                 ),
               ),
 
-              // Right-Side Corner 4-Button Pillar
+              // Right-Side Corner Action Pillar with Direction Toggle
               Positioned(
                 right: 18,
                 bottom: 128,
@@ -527,6 +800,15 @@ class _TrackingScreenState extends State<TrackingScreen>
                   cardBg: cardBg,
                   child: Column(
                     children: [
+                      // Direction Navigation Toggle Action
+                      _buildPillarAction(
+                        icon: Icons.directions_rounded,
+                        color: _isDirectionModeActive
+                            ? const Color(0xFF00E5FF)
+                            : textTitle,
+                        onTap: _toggleDirectionMode,
+                      ),
+                      _buildDivider(isDark),
                       _buildPillarAction(
                         icon: Icons.add_rounded,
                         color: textTitle,
@@ -557,7 +839,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                       _buildPillarAction(
                         icon: Icons.refresh_rounded,
                         color: textTitle,
-                        onTap: _fetchTracking,
+                        onTap: () => _fetchTracking(),
                       ),
                     ],
                   ),
@@ -579,7 +861,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                 ),
               ),
 
-              // Bottom Details Card with Signal Wave Background
+              // Bottom Details Card
               Positioned(
                 bottom: 22,
                 left: 18,
@@ -689,6 +971,37 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
+  Widget _buildUserLocationMarker() {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.28),
+          ),
+        ),
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF00E5FF),
+            border: Border.all(color: Colors.white, width: 2.4),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0xFF00E5FF),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPillarAction({
     required IconData icon,
     required Color color,
@@ -733,64 +1046,71 @@ class _TrackingScreenState extends State<TrackingScreen>
       animation: _radarController,
       builder: (context, child) {
         final double pulse = _radarController.value;
+        final double freshnessFactor =
+            (1.0 - (_secondsSinceLastUpdate / 90.0)).clamp(0.25, 1.0);
+        final double alpha = (1.0 - pulse) * 0.35 * freshnessFactor;
+
         return Stack(
           alignment: Alignment.center,
           children: [
             Container(
-              width: 42 + (pulse * 24),
-              height: 42 + (pulse * 24),
+              width: 44 + (pulse * 24),
+              height: 44 + (pulse * 24),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color:
                     (isDark ? const Color(0xFF00D2FF) : const Color(0xFF0284C7))
-                        .withValues(alpha: (1.0 - pulse) * 0.35),
+                        .withValues(alpha: alpha),
               ),
             ),
             child!,
           ],
         );
       },
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            colors: isDark
-                ? const [Color(0xFF00D2FF), Color(0xFF001E40)]
-                : const [Color(0xFF0284C7), Color(0xFF0F172A)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF0284C7).withValues(alpha: 0.40),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Center(
-          child: Hero(
-            tag: 'nav_arrow_${widget.bus.id}',
-            child: AnimatedRotation(
-              turns: _headingDegrees / 360.0,
-              duration: const Duration(milliseconds: 600),
-              curve: Curves.easeOutCubic,
-              child: const Icon(
-                Icons.navigation_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-          ),
-        ),
+      child: NeumorphicBusaloneIcon(
+        size: 46,
+        isDark: isDark,
       ),
     );
   }
 }
 
-/// Custom painter for background sinusoidal telemetry signal waves and tracking nodes
+class _InTransitRadarRingPainter extends CustomPainter {
+  final double progress;
+  final bool isDark;
+  final bool isMoving;
+
+  const _InTransitRadarRingPainter({
+    required this.progress,
+    required this.isDark,
+    required this.isMoving,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (!isMoving) return;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final double maxRadius = size.width / 2;
+    final double currentRadius = maxRadius * progress;
+    final double opacity = (1.0 - progress) * (isDark ? 0.35 : 0.20);
+
+    final Paint ripplePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..color = (isDark ? const Color(0xFF00D2FF) : const Color(0xFF0284C7))
+          .withValues(alpha: opacity);
+
+    canvas.drawCircle(center, currentRadius, ripplePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _InTransitRadarRingPainter oldDelegate) =>
+      oldDelegate.progress != progress ||
+      oldDelegate.isDark != isDark ||
+      oldDelegate.isMoving != isMoving;
+}
+
 class _SignalWaveLinesPainter extends CustomPainter {
   final double progress;
   final bool isDark;
@@ -815,7 +1135,6 @@ class _SignalWaveLinesPainter extends CustomPainter {
     final Color secondaryCobalt =
         isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1);
 
-    // Primary High Frequency Signal Wave
     final ui.Path wavePath1 = ui.Path();
     final double amp1 = 8.0 * amplitudeMultiplier;
     final double midY1 = h * 0.52;
@@ -836,7 +1155,6 @@ class _SignalWaveLinesPainter extends CustomPainter {
 
     canvas.drawPath(wavePath1, wavePaint1);
 
-    // Secondary Gentle Carrier Wave
     final ui.Path wavePath2 = ui.Path();
     final double amp2 = 5.0 * amplitudeMultiplier;
     final double midY2 = h * 0.62;
@@ -858,7 +1176,6 @@ class _SignalWaveLinesPainter extends CustomPainter {
 
     canvas.drawPath(wavePath2, wavePaint2);
 
-    // Dynamic Waypoint Signal Nodes along the primary wave
     final List<double> nodeFractions = [0.25, 0.55, 0.85];
     for (final fraction in nodeFractions) {
       final double nodeX = (w * ((fraction + (progress * 0.25)) % 1.0));
@@ -989,7 +1306,6 @@ class _InteractiveNeonGlowCardState extends State<_InteractiveNeonGlowCard>
                 borderRadius: BorderRadius.circular(widget.borderRadius),
                 child: Stack(
                   children: [
-                    // Ambient card cavity gradient
                     Positioned.fill(
                       child: Container(
                         decoration: BoxDecoration(
@@ -1015,7 +1331,6 @@ class _InteractiveNeonGlowCardState extends State<_InteractiveNeonGlowCard>
                         ),
                       ),
                     ),
-                    // Reactive Touch Neon Border
                     Positioned.fill(
                       child: CustomPaint(
                         painter: _NeonBorderGlowPainter(
@@ -1070,7 +1385,6 @@ class _NeonBorderGlowPainter extends CustomPainter {
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
 
-    // Base subtle border outline
     final baseBorderPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2
@@ -1087,7 +1401,6 @@ class _NeonBorderGlowPainter extends CustomPainter {
         (pos.dy / size.height) * 2 - 1,
       );
 
-      // Radial interior wash around touch point
       final auraShader = RadialGradient(
         center: centerAlignment,
         radius: 0.75,
@@ -1101,7 +1414,6 @@ class _NeonBorderGlowPainter extends CustomPainter {
 
       canvas.drawRRect(rrect, Paint()..shader = auraShader);
 
-      // Dynamic electric neon border stroke
       final borderShader = RadialGradient(
         center: centerAlignment,
         radius: 1.2,
