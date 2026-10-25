@@ -50,11 +50,11 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     'B.E - Electrical and Electronics Engineering',
     'B.E - Mechanical Engineering',
     'B.E - Civil Engineering',
-    'B.Tech - Information Technology'
+    'B.Tech - Information Technology',
     'B.Tech - Artificial Intelligence and Data Science',
     'B.Tech - Artificial Intelligence and Machine Learning',
-    'PG - Master of Business Administration'
-    'PG - Master of Computer Applications'
+    'PG - Master of Business Administration',
+    'PG - Master of Computer Applications',
   ];
 
   // Route & Stops Dropdown state
