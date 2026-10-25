@@ -89,7 +89,8 @@ class ApiService {
     await _storage.deleteAll();
   }
 
-  static Future<List<Map<String, dynamic>>> fetchBusRoutesList() async {
+  // Fetches routes along with their list of stops
+  static Future<Map<String, List<String>>> fetchBusRoutesWithStops() async {
     try {
       final response = await http
           .get(
@@ -104,29 +105,31 @@ class ApiService {
             ? decoded
             : (decoded['data'] ?? decoded['routes'] ?? []);
 
-        final Set<String> names = {};
+        final Map<String, List<String>> routeMap = {};
+
         for (final item in list) {
           if (item is Map) {
-            final name = (item['routeName'] ?? item['route_name'] ?? '').toString().trim();
+            final name = (item['routeName'] ?? item['route_name'] ?? item['name'] ?? '').toString().trim();
             if (name.isNotEmpty) {
-              names.add(name);
+              final rawStops = item['forwardStops'] ?? item['stops'] ?? [];
+              final List<String> stopsList = [];
+              if (rawStops is List) {
+                for (final s in rawStops) {
+                  if (s != null && s.toString().trim().isNotEmpty) {
+                    stopsList.add(s.toString().trim());
+                  }
+                }
+              }
+              routeMap[name] = stopsList;
             }
           }
         }
-
-        final sortedList = names.toList()..sort();
-        return sortedList
-            .map((name) => <String, dynamic>{
-                  'routeName': name,
-                  'route_name': name,
-                  'name': name,
-                })
-            .toList();
+        return routeMap;
       }
-      return const [];
+      return const {};
     } catch (e) {
-      debugPrint('[API Error fetchBusRoutesList]: $e');
-      return [];
+      debugPrint('[API Error fetchBusRoutesWithStops]: $e');
+      return {};
     }
   }
 
@@ -285,6 +288,7 @@ class ApiService {
     required String parentName,
     required String parentPhone,
     required String routeName,
+    required String stopName,
   }) async {
     try {
       debugPrint('[API] Sending registration payload with routeName: $routeName');
@@ -303,6 +307,7 @@ class ApiService {
               'parent_name': parentName.trim(),
               'parent_phone': parentPhone.trim(),
               'route_name': routeName.trim(),
+              'stop_name': stopName.trim(),
             }),
           )
           .timeout(const Duration(seconds: 30));
