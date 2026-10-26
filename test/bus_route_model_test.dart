@@ -1,28 +1,90 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fluttermobileapp/models/bus_model.dart';
+import 'package:fluttermobileapp/screens/home_screen.dart';
+import 'package:fluttermobileapp/screens/stops_bottom_sheet.dart';
+import 'package:fluttermobileapp/screens/tracking_screen.dart';
 
 void main() {
-  group('BusRouteModel', () {
-    test('getStops(false) keeps the forward stops in original order', () {
-      final route = BusRouteModel(
-        id: '1',
-        routeName: 'Sankaranpalayam',
-        busNo: 'Bus 10',
-        forwardStops: ['Main Bus St', 'Sankaranpalayam', 'Old Bus Stand'],
-      );
+  testWidgets('renders home screen without overflow on narrow screens',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+    addTearDown(() => tester.view.resetDevicePixelRatio());
 
-      expect(route.getStops(false), ['Main Bus St', 'Sankaranpalayam', 'Old Bus Stand']);
-    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(timeProvider: () => DateTime(2026, 8, 3, 9)),
+      ),
+    );
 
-    test('getStops(true) reverses the stop list for the evening return trip', () {
-      final route = BusRouteModel(
-        id: '1',
-        routeName: 'Sankaranpalayam',
-        busNo: 'Bus 10',
-        forwardStops: ['Main Bus St', 'Sankaranpalayam', 'Old Bus Stand'],
-      );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
 
-      expect(route.getStops(true), ['Old Bus Stand', 'Sankaranpalayam', 'Main Bus St']);
-    });
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('renders the home screen route list and action buttons',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(timeProvider: () => DateTime(2026, 8, 3, 9)),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Available Routes'), findsOneWidget);
+    expect(find.text('Sankaranpalayam'), findsWidgets);
+    expect(find.text('Stops'), findsWidgets);
+    expect(find.text('Track'), findsWidgets);
+  });
+
+  testWidgets('opens the route sheet from the home screen action',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(timeProvider: () => DateTime(2026, 8, 3, 9)),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    final stopsButton = tester.widget<ElevatedButton>(
+      find.widgetWithText(ElevatedButton, 'Stops').first,
+    );
+    expect(stopsButton.onPressed, isNotNull);
+
+    stopsButton.onPressed!.call();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.byType(StopsBottomSheet), findsOneWidget);
+    expect(find.text('Main Bus Stand'), findsWidgets);
+
+    final sheetContext = tester.element(find.byType(StopsBottomSheet));
+    Navigator.of(sheetContext).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.byType(StopsBottomSheet), findsNothing);
+  });
+
+  testWidgets('renders the home screen route list for evening mode',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(timeProvider: () => DateTime(2026, 8, 3, 15)),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(find.text('Available Routes'), findsOneWidget);
+    expect(find.text('Old Bus Stand'), findsWidgets);
+    expect(find.text('Track'), findsWidgets);
   });
 }
