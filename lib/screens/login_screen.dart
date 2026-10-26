@@ -50,15 +50,24 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     'B.E - Electrical and Electronics Engineering',
     'B.E - Mechanical Engineering',
     'B.E - Civil Engineering',
-    'B.Tech - Artificial Intelligence and Data Science',
     'B.Tech - Information Technology',
+    'B.Tech - Artificial Intelligence and Data Science',
+    'B.Tech - Artificial Intelligence and Machine Learning',
+    'PG - Master of Business Administration',
+    'PG - Master of Computer Applications',
   ];
 
-  // Route Dropdown state
+  // Route & Stops Dropdown state
+  Map<String, List<String>> _routeStopsMap = {};
   List<String> _busRoutes = [];
-String? _selectedRoute;
-bool _isRouteDropdownOpen = false;
-bool _isLoadingRoutes = false;
+  String? _selectedRoute;
+  bool _isRouteDropdownOpen = false;
+  bool _isLoadingRoutes = false;
+
+  // Boarding Stop state
+  List<String> _availableStops = [];
+  String? _selectedStop;
+  bool _isStopDropdownOpen = false;
 
   // 0: LOGIN, 1: REGISTRATION
   int _activeVerticalTabIndex = 0;
@@ -108,24 +117,14 @@ bool _isLoadingRoutes = false;
   
   Future<void> _loadBusRoutes() async {
     setState(() => _isLoadingRoutes = true);
-    final routes = await ApiService.fetchBusRoutesList();
+    final routeMap = await ApiService.fetchBusRoutesWithStops();
     if (!mounted) return;
 
-    final routeNames = <String>[];
-    for (final route in routes) {
-      final routeMap = route as Map<String, dynamic>;
-      final routeName = routeMap['route_name'] ??
-          routeMap['name'] ??
-          routeMap['routeName'] ??
-          routeMap['bus_route'] ??
-          routeMap['route'];
-      if (routeName != null && routeName.toString().trim().isNotEmpty) {
-        routeNames.add(routeName.toString());
-      }
-    }
+    final routeList = routeMap.keys.toList()..sort();
 
     setState(() {
-      _busRoutes = routeNames;
+      _routeStopsMap = routeMap;
+      _busRoutes = routeList;
       _isLoadingRoutes = false;
     });
   }
@@ -270,6 +269,11 @@ bool _isLoadingRoutes = false;
       _showBottomErrorSnackBar('Please select a bus route from dropdown.');
       return;
     }
+    if (_selectedStop == null || _selectedStop!.isEmpty) {
+      debugPrint('Validation failed: Boarding stop not selected');
+      _showBottomErrorSnackBar('Please select your boarding stop.');
+      return;
+    }
 
     final mobileRegex = RegExp(r'^[6-9]\d{9}$');
     if (!mobileRegex.hasMatch(studentMobile)) {
@@ -321,6 +325,7 @@ bool _isLoadingRoutes = false;
       parentName: parentName,
       parentPhone: parentPhone,
       routeName:_selectedRoute!,
+      stopName: _selectedStop!,
     );
 
     debugPrint('Registration Result from API: $result');
@@ -329,16 +334,29 @@ bool _isLoadingRoutes = false;
     setState(() => _isLoading = false);
 
     if (result['success'] == true) {
-  _showRegistrationSuccessDialog(studentId);
-} else {
-  final errorMsg = result['error']?.toString() ?? 'Registration failed.';
+      _showRegistrationSuccessDialog(studentId);
+    }else {
+        final errorMsg = result['error']?.toString() ?? 'Registration failed.';
+      final lowerError = errorMsg.toLowerCase();
   
-  if (errorMsg.contains('already registered')) {
-    _showAlreadyRegisteredDialog(studentId);
-  } else {
-    _showBottomSnackBar(errorMsg);
-  }
-}
+    // Check for email collision across different student IDs
+    if (lowerError.contains('email') && 
+          (lowerError.contains('already registered') || 
+           lowerError.contains('another student account') ||
+           lowerError.contains('in use'))) {
+      _showBottomErrorSnackBar(
+          errorMsg, // Directly displays: "The email address ... is already registered with another student account (F26GQAD200)."
+        );
+      }
+      // 2. CHECK SECOND: Student ID itself is already registered
+      else if (lowerError.contains('already registered') || 
+               lowerError.contains('student already exists')) {
+        _showAlreadyRegisteredDialog(studentId); //[cite: 4]
+      }
+      else {
+        _showBottomSnackBar(errorMsg);
+      }
+    }
   } catch (err, stack) {
     debugPrint('Exception in _handleRegistration: $err');
     debugPrint('Stack: $stack');
@@ -867,7 +885,7 @@ void _showBottomSnackBar(String message) {
               child: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 4),
                 child: Text(
-                  'Forgot / Lost Password?',
+                  'Forgot Password?',
                   style: TextStyle(
                     fontSize: 12.0,
                     fontWeight: FontWeight.w600,
@@ -1123,6 +1141,20 @@ void _showBottomSnackBar(String message) {
         const SizedBox(height: 8),
         _buildRouteDropdown(),
 
+        // --- ADDED BOARDING STOP DROPDOWN HERE ---
+        const SizedBox(height: 14),
+        const Text(
+          'BOARDING STOP',
+          style: TextStyle(
+            fontSize: 10.0,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.2,
+            color: Color(0xFFBACFE6),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _buildStopDropdown(),
+
         const SizedBox(height: 18),
 
         // Static Guidelines Notice Board
@@ -1282,6 +1314,8 @@ void _showBottomSnackBar(String message) {
                           onTap: () {
                             setState(() {
                               _selectedRoute = route;
+                              _availableStops = _routeStopsMap[route] ?? [];
+                              _selectedStop = null;
                               _isRouteDropdownOpen = false;
                             });
                           },
@@ -1311,6 +1345,150 @@ void _showBottomSnackBar(String message) {
                       },
                     ),
                   ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // BOARDING STOP DROPDOWN (Populated based on chosen route)
+  Widget _buildStopDropdown() {
+    final bool isEnabled = _selectedRoute != null && _availableStops.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: isEnabled
+                ? () {
+                    setState(() {
+                      _isStopDropdownOpen = !_isStopDropdownOpen;
+                      _isRouteDropdownOpen = false;
+                      _isDepartmentDropdownOpen = false;
+                    });
+                  }
+                : () {
+                    _showBottomErrorSnackBar('Please choose a bus route first.');
+                  },
+            child: Container(
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: const Color.fromARGB(0, 255, 254, 254).withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(
+                  color: _isStopDropdownOpen
+                      ? const Color.fromARGB(122, 0, 0, 0).withValues(alpha: 0.30)
+                      : isEnabled
+                          ? Colors.white.withValues(alpha: 0.16)
+                          : Colors.white.withValues(alpha: 0.06),
+                  width: _isStopDropdownOpen ? 1.0 : 0.3,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.pin_drop_rounded,
+                    size: 18,
+                    color: _isStopDropdownOpen
+                        ? const Color.fromARGB(255, 4, 163, 255)
+                        : isEnabled
+                            ? Colors.white54
+                            : Colors.white24,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _selectedStop ??
+                          (_selectedRoute == null
+                              ? 'Select bus route first'
+                              : (_availableStops.isEmpty
+                                  ? 'No stops available'
+                                  : 'Select Boarding Stop')),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.0,
+                        fontWeight: FontWeight.w600,
+                        color: _selectedStop != null
+                            ? Colors.white
+                            : (isEnabled
+                                ? const Color.fromARGB(113, 255, 255, 255)
+                                : Colors.white30),
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _isStopDropdownOpen ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                    color: isEnabled ? const Color.fromARGB(255, 148, 148, 148) : Colors.white24,
+                    size: 22,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_isStopDropdownOpen && isEnabled) ...[
+          const SizedBox(height: 4),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 140),
+            decoration: BoxDecoration(
+              color: const Color(0xFF081724),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.15), width: 0.5),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.75), blurRadius: 12, offset: const Offset(4, 4)),
+              ],
+            ),
+            child: RawScrollbar(
+              thumbColor: const Color.fromARGB(255, 141, 139, 139).withValues(alpha: 0.5),
+              radius: const Radius.circular(15),
+              thickness: 2.0,
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                itemCount: _availableStops.length,
+                separatorBuilder: (context, _) => Divider(height: 5, color: Colors.white.withValues(alpha: 0.03)),
+                itemBuilder: (context, index) {
+                  final stop = _availableStops[index];
+                  final isSelected = _selectedStop == stop;
+
+                  return InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedStop = stop;
+                        _isStopDropdownOpen = false;
+                      });
+                    },
+                    child: Container(
+                      color: isSelected
+                          ? const Color.fromARGB(255, 4, 163, 255).withValues(alpha: 0.15)
+                          : Colors.transparent,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              stop,
+                              style: TextStyle(
+                                fontSize: isSelected ? 13.0 : 11.5,
+                                fontWeight: isSelected ? FontWeight.w900 : FontWeight.w500,
+                                color: isSelected ? const Color.fromARGB(255, 4, 163, 255) : Colors.white70,
+                              ),
+                            ),
+                          ),
+                          if (isSelected)
+                            const Icon(Icons.check_rounded, size: 16, color: Color.fromARGB(255, 4, 163, 255)),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ],
       ],
@@ -1526,7 +1704,7 @@ Widget _buildDepartmentDropdown() {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Text(
-              'Forgot / Lost Password?',
+              'Forgot Password?',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
